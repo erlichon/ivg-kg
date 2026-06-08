@@ -115,6 +115,30 @@ class TestTextContentAbsence:
         assert result.description is None
         assert result is not ctx  # still a new object
 
+    # ------------------------------------------------------------------
+    # Regression: triples list aliasing (Finding #1, SPEC §3.2)
+    # ------------------------------------------------------------------
+
+    def test_triples_list_is_distinct_on_matching_branch(self) -> None:
+        ctx = make_ctx(entity_id="Q1")
+        p = TextContentAbsence(entity_id="Q1")
+        result = p.withhold(ctx)
+        assert result.triples is not ctx.triples
+
+    def test_triples_list_is_distinct_on_non_matching_branch(self) -> None:
+        ctx = make_ctx(entity_id="Q2")
+        p = TextContentAbsence(entity_id="Q1")
+        result = p.withhold(ctx)
+        assert result.triples is not ctx.triples
+
+    def test_mutating_result_triples_does_not_affect_input(self) -> None:
+        ctx = make_ctx(entity_id="Q1")
+        original_len = len(ctx.triples)
+        p = TextContentAbsence(entity_id="Q1")
+        result = p.withhold(ctx)
+        result.triples.append(EDGE_C)
+        assert len(ctx.triples) == original_len
+
 
 # ---------------------------------------------------------------------------
 # ImageContentAbsence
@@ -157,6 +181,30 @@ class TestImageContentAbsence:
         p = ImageContentAbsence(entity_id="Q1")
         result = p.withhold(ctx)
         assert result is not ctx
+
+    # ------------------------------------------------------------------
+    # Regression: triples list aliasing (Finding #1, SPEC §3.2)
+    # ------------------------------------------------------------------
+
+    def test_triples_list_is_distinct_on_matching_branch(self) -> None:
+        ctx = make_ctx(entity_id="Q1")
+        p = ImageContentAbsence(entity_id="Q1")
+        result = p.withhold(ctx)
+        assert result.triples is not ctx.triples
+
+    def test_triples_list_is_distinct_on_non_matching_branch(self) -> None:
+        ctx = make_ctx(entity_id="Q2")
+        p = ImageContentAbsence(entity_id="Q1")
+        result = p.withhold(ctx)
+        assert result.triples is not ctx.triples
+
+    def test_mutating_result_triples_does_not_affect_input(self) -> None:
+        ctx = make_ctx(entity_id="Q1")
+        original_len = len(ctx.triples)
+        p = ImageContentAbsence(entity_id="Q1")
+        result = p.withhold(ctx)
+        result.triples.append(EDGE_C)
+        assert len(ctx.triples) == original_len
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +288,23 @@ class TestKnowledgeAbsence:
         result = p.withhold(ctx)
         # EDGE_A should still be present
         assert any(e.property_id == "P31" for e in result.triples)
+
+    def test_triples_list_is_distinct_from_input(self) -> None:
+        # KnowledgeAbsence already builds a fresh list; confirm the invariant holds.
+        ctx = make_ctx(entity_id="Q1")
+        ref = TripleRef(subject_id="Q1", property_id="P999")  # no match
+        p = KnowledgeAbsence(triples=[ref])
+        result = p.withhold(ctx)
+        assert result.triples is not ctx.triples
+
+    def test_mutating_result_triples_does_not_affect_input(self) -> None:
+        ctx = make_ctx(entity_id="Q1")
+        original_len = len(ctx.triples)
+        ref = TripleRef(subject_id="Q1", property_id="P999")  # no match
+        p = KnowledgeAbsence(triples=[ref])
+        result = p.withhold(ctx)
+        result.triples.append(EDGE_C)
+        assert len(ctx.triples) == original_len
 
 
 # ---------------------------------------------------------------------------
@@ -484,6 +549,14 @@ class TestControlSpec:
             spec = cls.control_spec()
             # Must not raise
             json.dumps(spec)
+
+    def test_base_control_spec_works_for_all_registered_types(self) -> None:
+        # Regression for Finding #2: cls.modality must be accessible at class
+        # level (ClassVar) so the base control_spec default does not raise.
+        for cls in available_perturbations().values():
+            spec = cls.control_spec()
+            assert "modality" in spec
+            assert spec["type_name"] == cls.type_name
 
 
 # ---------------------------------------------------------------------------

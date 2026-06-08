@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import ClassVar
 
 from ivg_kg.schema import GenerationContext, KGEdge, Modality, TripleRef
 
@@ -57,12 +58,12 @@ def _edge_matches(edge: KGEdge, ref: TripleRef) -> bool:
 class KnowledgeAbsence(Perturbation):
     """Withholds specified triples from the generation context."""
 
-    type_name: str = "knowledge_absence"
+    type_name: ClassVar[str] = "knowledge_absence"
+    modality: ClassVar[Modality] = Modality.STRUCTURE
 
     def __init__(self, triples: list[TripleRef]) -> None:
         self.triples_to_withhold: list[TripleRef] = list(triples)
         self.id: str = _stable_id(self.triples_to_withhold)
-        self.modality: Modality = Modality.STRUCTURE
 
     # ------------------------------------------------------------------
     # Core interface

@@ -59,8 +59,8 @@ class Perturbation(ABC):
     """
 
     type_name: ClassVar[str]
+    modality: ClassVar[Modality]
     id: str
-    modality: Modality
 
     @abstractmethod
     def withhold(self, ctx: GenerationContext) -> GenerationContext:

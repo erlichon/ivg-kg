@@ -8,6 +8,8 @@ description=None; otherwise return ctx unchanged (as a copy).
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from ivg_kg.schema import GenerationContext, Modality
 
 from .base import Perturbation, register_perturbation
@@ -17,22 +19,27 @@ from .base import Perturbation, register_perturbation
 class TextContentAbsence(Perturbation):
     """Withholds the text description from the generation context."""
 
-    type_name: str = "text_content_absence"
+    type_name: ClassVar[str] = "text_content_absence"
+    modality: ClassVar[Modality] = Modality.TEXT
 
     def __init__(self, entity_id: str) -> None:
         self.entity_id: str = entity_id
         self.id: str = f"text_content_absence:{entity_id}"
-        self.modality: Modality = Modality.TEXT
 
     # ------------------------------------------------------------------
     # Core interface
     # ------------------------------------------------------------------
 
     def withhold(self, ctx: GenerationContext) -> GenerationContext:
-        """Return a new context with description=None if entity matches."""
+        """Return a new context with description=None if entity matches.
+
+        The returned context always owns a distinct triples list so that
+        mutating it cannot affect the caller's original context
+        (Invariant #1, SPEC §3.2).
+        """
         if ctx.entity_id == self.entity_id:
-            return ctx.model_copy(update={"description": None})
-        return ctx.model_copy()
+            return ctx.model_copy(update={"description": None, "triples": list(ctx.triples)})
+        return ctx.model_copy(update={"triples": list(ctx.triples)})
 
     def manifest_entry(self) -> dict:
         return {
