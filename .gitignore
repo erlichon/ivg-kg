@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ivg-kg runtime data (build-time artifacts; not tracked)
+data/cache/
+data/runs/
+
+# Tool caches
+.ruff_cache/

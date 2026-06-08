@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ivg-kg"
+version = "0.1.0"
+description = "IVG-KG: Interpretable Visual Grounding via Knowledge Graphs"
+requires-python = ">=3.11"
+dependencies = [
+    "dash>=2.18.2",
+    "dash-cytoscape>=1.0.2",
+    "plotly>=5.24.1",
+    "networkx>=3.4.2",
+    "pydantic>=2.10.4",
+    "pandas>=2.2.3",
+    "pyarrow>=18.1.0",
+]
+
+[project.optional-dependencies]
+data = [
+    "requests>=2.32.3",
+    "SPARQLWrapper>=2.0.0",
+    "WikibaseIntegrator>=0.12.9",
+]
+grounding = [
+    "transformers>=4.48.0",
+    "torch>=2.5.1",
+]
+dev = [
+    "pytest>=8.3.4",
+    "ruff>=0.9.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ivg_kg"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "N",   # pep8-naming
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ivg_kg"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
