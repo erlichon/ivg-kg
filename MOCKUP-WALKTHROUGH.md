@@ -67,6 +67,19 @@ strip renders `error_rates` (text-NLI 6%, structure-path 9%).
   top-p, max-new-tokens, model — for the live N-generation path. Presentational in the
   mock; the on-stage figures run off precomputed offline run-sets (§4.6/§10).
 
+## Repair loop — KG injection / restore (SPEC-text §4.6, RQ3 + CogMG)
+The defining interaction, in the full-width strip at the bottom (**Overview →
+Inspection → Repair → Overview**):
+- Pick a **condition** (full / knowledge-absent / content-absent). Under
+  **knowledge-absent** the dependent claims fabricate (absence-induced hallucination).
+- Each withheld triple is a card: **↺ restore** (RQ3 — re-add to the *generation
+  context*, regenerate, re-ground) or **✚ inject** (CogMG — add a genuinely-missing
+  triple to the *KG-full reference*). Click one → the dependent claim(s) flip
+  fabricated → grounded and the **repair-leverage** (+N claims re-grounded) updates.
+- e.g. *restore* `place of birth (P19)` grounds "born in Marainville"; *inject*
+  `date of birth (P569) = 15 April 1771` corrects the fabricated "17 June". →
+  `screenshots/07-repair-loop.png`
+
 ## Reading aids
 - **Mean ± std error bars** on the claim-status distribution: bars are the mean per-draw
   fraction over the N generations, whiskers are ±1 std across those draws.
@@ -82,6 +95,7 @@ strip renders `error_rates` (text-NLI 6%, structure-path 9%).
 | `screenshots/03-multiselect-brush.png` | Three claims multi-selected, brushed onto the subgraph with badges + readable edge labels (#2) |
 | `screenshots/04-node-zoom-detail.png` | Node tapped → zoom + entity-detail pane (#7) |
 | `screenshots/06-generation-settings.png` | ⚙ generation-settings panel open (mock LLM params) |
+| `screenshots/07-repair-loop.png` | Repair loop: knowledge-absent → restore P19 + inject P569 → claims re-ground, leverage +2 |
 
 ## Authored design details (where the spec left them open)
 - **Node cap:** `SUBGRAPH_NODE_CAP = 40` (`src/ivg_kg/config.py`).

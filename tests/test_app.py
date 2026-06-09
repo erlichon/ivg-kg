@@ -179,3 +179,13 @@ def test_status_distribution_figure_with_std():
         d.status_distribution, d.n_generations, d.status_distribution_std
     )
     assert isinstance(fig, go.Figure)
+
+
+def test_repair_panel_and_callbacks():
+    from app.panels.repair import get_repair_panel, render_repair_body
+
+    assert get_repair_panel() is not None
+    assert "repair-leverage" in str(render_repair_body("knowledge-absent", ["P22"]))
+    app = make_app()
+    assert sum(1 for k in app.callback_map if "repaired.data" in k) == 1
+    assert sum(1 for k in app.callback_map if "repair-body.children" in k) == 1

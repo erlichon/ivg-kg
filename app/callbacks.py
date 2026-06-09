@@ -21,6 +21,7 @@ from dash.exceptions import PreventUpdate
 from app.charts.status_dist import make_status_distribution_figure
 from app.panels.analytics import fab_rate_readout, per_claim_view
 from app.panels.answer import render_claim_list
+from app.panels.repair import render_repair_body
 from app.panels.subgraph import (
     BASE_STYLESHEET,
     ego_elements,
@@ -155,3 +156,34 @@ def register_callbacks(
         style = dict(style or {})
         style["display"] = "block" if (n or 0) % 2 == 1 else "none"
         return style
+
+    # ---- H: repair loop — condition change / apply repair -> repaired set ----
+    @app.callback(
+        Output("repaired", "data"),
+        Input("condition-selector", "value"),
+        Input({"type": "repair-item", "item": ALL}, "n_clicks"),
+        State("repaired", "data"),
+        prevent_initial_call=True,
+    )
+    def update_repaired(_condition, _clicks, current):  # noqa: ANN001
+        trig = dash.ctx.triggered_id
+        if trig == "condition-selector":
+            return []  # reset repairs when the condition changes
+        if isinstance(trig, dict) and trig.get("type") == "repair-item":
+            if not dash.ctx.triggered or not dash.ctx.triggered[0].get("value"):
+                raise PreventUpdate
+            rep = list(current or [])
+            item = trig.get("item")
+            if item not in rep:
+                rep.append(item)
+            return rep
+        raise PreventUpdate
+
+    # ---- I: condition + repaired -> repair-strip body (#7) ------------------
+    @app.callback(
+        Output("repair-body", "children"),
+        Input("condition-selector", "value"),
+        Input("repaired", "data"),
+    )
+    def render_repair(condition, repaired):  # noqa: ANN001
+        return render_repair_body(condition, repaired or [])

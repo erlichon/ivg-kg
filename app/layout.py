@@ -14,6 +14,7 @@ from dash import dcc, html
 from app import theme
 from app.panels.analytics import DEFAULT_N, get_analytics_panel
 from app.panels.answer import get_answer_panel
+from app.panels.repair import get_repair_panel
 from app.panels.subgraph import get_subgraph_panel
 from ivg_kg.mock.fixtures import (
     mock_answer_diagnostics,
@@ -193,6 +194,7 @@ def get_layout(
     return html.Div(
         [
             dcc.Store(id="selected-claims", data=[]),
+            dcc.Store(id="repaired", data=[]),
             _header(run),
             _settings_panel(),
             html.Div(
@@ -204,9 +206,10 @@ def get_layout(
                     html.Div(get_analytics_panel(run, diagnostics),
                              style={"flex": "1.1", "minWidth": "0"}),
                 ],
-                style={"display": "flex", "gap": "14px", "padding": "0 18px 20px 18px",
+                style={"display": "flex", "gap": "14px", "padding": "0 18px 14px 18px",
                        "alignItems": "stretch"},
             ),
+            get_repair_panel(),
         ],
         style={
             "fontFamily": theme.MONO,

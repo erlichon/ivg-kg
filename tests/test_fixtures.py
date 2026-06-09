@@ -103,3 +103,14 @@ def test_distribution_has_mean_and_std():
     assert set(d.status_distribution_std) == set(d.status_distribution)
     assert all(v >= 0 for v in d.status_distribution_std.values())
     assert d.fabrication_rate_std >= 0.0
+
+
+def test_repair_loop_logic():
+    full = fx.effective_statuses("full")
+    assert sum(1 for s in full.values() if s.value != "fabricated") == 5
+    ka = fx.effective_statuses("knowledge-absent", [])
+    assert all(s.value == "fabricated" for s in ka.values())
+    assert fx.repair_leverage("knowledge-absent", []) == 0
+    all_items = [it["id"] for it in fx.REPAIR_ITEMS]
+    assert fx.repair_leverage("knowledge-absent", all_items) == 6
+    assert {"restore", "inject"} <= {it["kind"] for it in fx.REPAIR_ITEMS}

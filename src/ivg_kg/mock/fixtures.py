@@ -375,3 +375,73 @@ def build_runset(n: int = _MAX_DRAWS) -> list[GroundingRun]:
 def mock_answer_diagnostics(n: int = _MAX_DRAWS) -> AnswerDiagnostics:
     """Aggregate the n-draw RunSet into AnswerDiagnostics (§4.8)."""
     return aggregate_runset(build_runset(n))
+
+
+# ---------------------------------------------------------------------------
+# Repair loop (mock; SPEC-text §4.6 / RQ3 + CogMG augmentation)
+# ---------------------------------------------------------------------------
+# Under KNOWLEDGE-ABSENCE these triples are withheld from the generation context,
+# so the dependent claims fabricate. The analyst either RESTORES a withheld
+# triple (RQ3 repair loop — re-add to the generation context, regenerate, re-
+# ground) or INJECTS a genuinely-missing one (CogMG — add to the KG-full
+# reference). Either re-grounds the dependent claims: repair-leverage = the
+# number that flip fabricated -> grounded. Deterministic, scripted, offline.
+CONDITIONS = ["full", "knowledge-absent", "content-absent"]
+
+# Which withheld triples each claim needs in order to ground (knowledge-absent).
+CLAIM_COVERAGE: dict[str, frozenset[str]] = {
+    "c1": frozenset({"P22"}),
+    "c2": frozenset({"P19"}),
+    "c3": frozenset({"P569"}),
+    "c4": frozenset({"P19", "P17"}),
+    "c5": frozenset({"P22", "P19", "P17"}),
+    "c6": frozenset({"P800"}),
+}
+
+# The status a claim takes once grounded again.
+_GROUNDED_STATUS: dict[str, ClaimStatus] = {
+    "c1": ClaimStatus.RETRIEVED,
+    "c2": ClaimStatus.RETRIEVED,
+    "c3": ClaimStatus.RETRIEVED,
+    "c4": ClaimStatus.REASONED_SUPPORTABLE,
+    "c5": ClaimStatus.REASONED_SUPPORTABLE,
+    "c6": ClaimStatus.RETRIEVED,
+}
+
+# The repair palette shown under knowledge-absence. `restore` = RQ3 (re-add to
+# the generation context); `inject` = CogMG (add a new triple to the KG-full).
+REPAIR_ITEMS: list[dict] = [
+    {"id": "P22", "label": "father (P22): Chopin → Nicolas Chopin", "kind": "restore"},
+    {"id": "P19", "label": "place of birth (P19): Nicolas → Marainville", "kind": "restore"},
+    {"id": "P17", "label": "country (P17): Marainville → France", "kind": "restore"},
+    {"id": "P800", "label": "notable work (P800): Chopin → Nocturnes", "kind": "restore"},
+    {"id": "P569", "label": "date of birth (P569): Nicolas → 15 April 1771", "kind": "inject"},
+]
+
+
+def effective_statuses(condition: str, repaired: list[str] | None = None) -> dict[str, ClaimStatus]:
+    """Displayed claim status per condition, after applying restored/injected items.
+
+    full / content-absent: the canonical statuses (structure intact). knowledge-
+    absent: every claim fabricates until its needed triples are restored/injected.
+    """
+    rep = set(repaired or [])
+    canon = {c.claim_id: c.status for c in canonical_claims()}
+    if condition != "knowledge-absent":
+        return canon
+    out: dict[str, ClaimStatus] = {}
+    for cid, need in CLAIM_COVERAGE.items():
+        out[cid] = _GROUNDED_STATUS[cid] if need <= rep else ClaimStatus.FABRICATED
+    return out
+
+
+def repair_leverage(condition: str, repaired: list[str] | None = None) -> int:
+    """Number of claims grounded by the current repairs (knowledge-absence only)."""
+    if condition != "knowledge-absent":
+        return 0
+    rep = set(repaired or [])
+    return sum(1 for need in CLAIM_COVERAGE.values() if need <= rep)
+
+
+def claim_text_by_id() -> dict[str, str]:
+    return {c.claim_id: c.text for c in canonical_claims()}
