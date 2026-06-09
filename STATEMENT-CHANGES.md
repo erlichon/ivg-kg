@@ -324,3 +324,47 @@ SPEC-side fixes from the same review (no statement impact): under-typed contract
 its own path; composed-manifest attribution caveat.
 
 **Statement and SPEC are now consistent and build-ready (P0).** Only F6 remains, on the user.
+
+---
+
+## Addendum — doc restructure + artwork image axis + course alignment
+
+After distilling the course material (`course/`) and an alignment review, plus a TA message
+endorsing fact-bearing-image domains, the following were applied:
+
+**Doc restructure (SPEC split; TASKS text-first).** `SPEC.md` → three specs: `spec/SPEC-text.md`
+(books core + the shared multimodal-ready schema + perturbation seam + shared grounding/UI/
+validation), `spec/SPEC-image-artwork.md` (image axis primary + shared image infra: VLM, visual
+probe, image grading), `spec/SPEC-image-taxa.md` (verified fallback, thin). `TASKS.md` → text/books
+only (the M-BOOKS spine); the gated image tasks moved to `tasks/TASKS-image-artwork.md` and
+`tasks/TASKS-image-taxa.md` (not opened until M-BOOKS). The schema lives once in SPEC-text; image
+specs reference it. Old root `SPEC.md`/`TASKS.md` removed. `project_statement.md` stays a single
+unified scientific doc.
+
+**Image axis pivot: taxa → artwork-primary, taxa-fallback (gated, post-M-BOOKS, curtailable).**
+- Driven by the TA's endorsement of fact-bearing-image domains and richer multimodal value.
+- **Artwork (paintings, Q3305213)** is primary. A non-redundancy gate (QLever) found ~4,180 band
+  paintings with image+`depicts`; entity-presence is often KG-redundant via P180, but the
+  **non-redundant signal is relational/compositional** (verified by inspecting Bouguereau's "The
+  Bohemian"): facts like *held-not-played*, *behind*, spatial layout that a flat P180 cannot express.
+  → image axis targets **relational** facts; adds **multi-layer attribution** (KG/text/visual/none,
+  the VISA analogue) to RQ1; RQ2 ablates the image and measures fabrication on relational claims.
+- **Taxa range-maps** retained as the **de-risked fallback** (its gate is already verified) if the
+  artwork validity gate fails; else books-only (no core loss). Fallback chain: artwork → taxa → books.
+- Books spine + books-first hard gate are **unchanged**; only the gated second slice is re-pointed.
+
+**Course-alignment changes (from `course/DELIVERABLE-RUBRICS.md` + `MMA-MODEL.md`).**
+- §6 now cites **Pike 2009** (science of interaction — required framing) and **Sacha 2014**
+  (knowledge-generation cycle), and maps the interface onto the **Worring et al. MMA model**
+  (3 zones / 4 UI pillars; Trust pillar = the error-rate indicator). New refs [10]/[11]/[12].
+- **Trust-pillar UI indicator** (render existing `GroundingRun.error_rates`) and **show-entity-images**
+  in the detail pane added to SPEC-text §4.5 / TASKS UI2/UI4 (high-ROI, small).
+- **UMAP/projection panel dropped** (claim-text embeddings don't separate by grounding status →
+  decorative; the rubric penalizes unfocused views). Future-work mention only.
+- Report-phase MUSTs recorded in TASKS EX6: MMA interaction-design figure, 5-min recording, GitHub
+  link, per-member-contribution + AI-tool appendix.
+
+**Dates.** Personal M-BOOKS target **2026-06-12**; real course backstops **demo 2026-06-23**,
+**report 2026-06-25**, **presentation 2026-06-27** (verified from the raw instructions; the earlier
+2026-06-14 was the user's personal early target, not a course deadline). The "5-day runway / assume
+image drops" framing is replaced by "gated + curtailable on the ~2-week real runway."
