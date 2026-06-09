@@ -1,16 +1,20 @@
-"""Callback registration for the IVG-KG Dash app (SPEC §4.5).
+"""Callback registration for the IVG-KG Dash app (SPEC-text §4.5).
 
-Registers exactly three callbacks:
+Registers exactly four callbacks:
   CB1 — click → Store("selected-claim"): written ONLY here
   CB2 — Store → Cytoscape stylesheet (highlight support path)
   CB3 — Store → analytics detail area
+  CB4 — Cytoscape tapNodeData → entity-detail pane (shows the entity image when
+        present, P18; reads the tapped node independently of the store)
 
-No circular callbacks: CB2 and CB3 only READ the store, never write it.
+No circular callbacks: CB2/CB3 only READ the store; CB4 reads the tapped node
+and writes only node-detail — none of them write the store.
 
 Pure helper functions (unit-testable without a running server):
   select_claim_from_trigger(triggered)  -> str | None
   support_elements_for_claim(run, claim_id) -> (edge_ids, node_ids)
   analytics_detail_for_claim(run, claim_id) -> Dash component
+  node_detail_content(node_data) -> Dash component
 """
 from __future__ import annotations
 
@@ -187,13 +191,63 @@ def analytics_detail_for_claim(
     )
 
 
+def node_detail_content(node_data: dict | None) -> html.Div:
+    """Build the entity-detail pane for a tapped subgraph node.
+
+    Shows the node label and description, and — when the node carries an
+    ``image_path`` — the entity image (SPEC-text §4.5: show the entity image
+    when present; a demo-visual P18 touch, NOT grounding evidence in the books
+    spine). Returns a placeholder when no node is tapped (``node_data`` None).
+
+    Generic: it renders an image for ANY node that has one (books covers /
+    author portraits now; image-axis slices post-M-BOOKS) — no slice-specific
+    logic.
+    """
+    if not node_data:
+        return html.Div(
+            "Tap a node to see its details.",
+            style={"color": "#585b70", "fontStyle": "italic"},
+        )
+
+    label = node_data.get("label") or node_data.get("id", "?")
+    children: list = [
+        html.Div(
+            label,
+            style={"color": "#cdd6f4", "fontWeight": "bold", "marginBottom": "4px"},
+        )
+    ]
+
+    description = node_data.get("description")
+    if description:
+        children.append(
+            html.Div(description, style={"fontSize": "0.85em", "marginBottom": "6px"})
+        )
+
+    image_path = node_data.get("image_path")
+    if image_path:
+        children.append(
+            html.Img(
+                src=image_path,
+                alt=f"{label} image",
+                style={
+                    "maxWidth": "100%",
+                    "maxHeight": "180px",
+                    "marginTop": "4px",
+                    "borderRadius": "4px",
+                },
+            )
+        )
+
+    return html.Div(children)
+
+
 # ---------------------------------------------------------------------------
 # Callback registration
 # ---------------------------------------------------------------------------
 
 
 def register_callbacks(app: dash.Dash, run: GroundingRun) -> None:
-    """Register CB1, CB2, CB3 on the given Dash app.
+    """Register CB1, CB2, CB3, CB4 on the given Dash app.
 
     Parameters
     ----------
@@ -249,3 +303,15 @@ def register_callbacks(app: dash.Dash, run: GroundingRun) -> None:
     )
     def cb3_store_to_analytics(claim_id: str | None) -> html.Div:
         return analytics_detail_for_claim(run, claim_id)
+
+    # ------------------------------------------------------------------
+    # CB4 — Cytoscape tapNodeData → entity-detail pane
+    # Reads the tapped node independently of the store (no circular dep);
+    # writes ONLY node-detail. Shows the entity image when present (§4.5).
+    # ------------------------------------------------------------------
+    @app.callback(
+        Output("node-detail", "children"),
+        Input("subgraph", "tapNodeData"),
+    )
+    def cb4_tap_to_node_detail(node_data: dict | None) -> html.Div:
+        return node_detail_content(node_data)

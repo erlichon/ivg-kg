@@ -6,7 +6,7 @@ Nothing here triggers network I/O or heavy imports.
 """
 
 # ---------------------------------------------------------------------------
-# Sitelink band (SPEC §4.1)
+# Sitelink band (SPEC-text §4.1)
 # Select books whose Wikipedia sitelink count falls in [BAND_LO, BAND_HI].
 # ---------------------------------------------------------------------------
 BAND_LO: int = 5
@@ -14,18 +14,18 @@ BAND_HI: int = 40
 SITELINK_BAND: tuple[int, int] = (BAND_LO, BAND_HI)
 
 # ---------------------------------------------------------------------------
-# Graph traversal (SPEC §4.2)
+# Graph traversal (SPEC-text §4.2)
 # ---------------------------------------------------------------------------
 K_HOPS: int = 2  # default; tunable 2-3
 
 # ---------------------------------------------------------------------------
-# Grounding threshold (SPEC §10)
+# Grounding threshold (SPEC-text §4.3)
 # Entailment score must exceed TAU for a claim to be considered supported.
 # ---------------------------------------------------------------------------
 TAU: float = 0.5
 
 # ---------------------------------------------------------------------------
-# SPARQL endpoints (SPEC §12)
+# SPARQL endpoints (SPEC-text §4.1)
 # ---------------------------------------------------------------------------
 WDQS_ENDPOINT: str = "https://query.wikidata.org/sparql"
 QLEVER_ENDPOINT: str = "https://qlever.dev/api/wikidata"
@@ -37,7 +37,7 @@ WDQS_USER_AGENT: str = (
 )
 
 # ---------------------------------------------------------------------------
-# Model identifiers (SPEC §7)
+# Model identifiers (SPEC-text §7)
 # These are config constants only; nothing is downloaded at P0.
 # ---------------------------------------------------------------------------
 

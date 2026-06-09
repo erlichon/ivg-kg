@@ -1,5 +1,5 @@
 """
-Central pydantic v2 schema contract for IVG-KG (SPEC §4.2).
+Central pydantic v2 schema contract for IVG-KG (SPEC-text §4.2).
 
 All models are JSON-serialisable for use with Dash dcc.Store.
 No third-party imports beyond pydantic and stdlib enum/typing.
@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 class ClaimStatus(StrEnum):
     """Grounding outcome for a single claim.
 
-    Values are given verbatim in SPEC §4.2; the hyphen in REASONED_SUPPORTABLE
+    Values are given verbatim in SPEC-text §4.2; the hyphen in REASONED_SUPPORTABLE
     is intentional and must not be changed.
     """
 
@@ -92,7 +92,7 @@ class KGNode(BaseModel):
     label: str
     description: str | None = None
     sitelinks: int | None = None
-    image_path: str | None = None  # used for taxa images (P181); not a grading target
+    image_path: str | None = None  # image-axis slices (artwork/taxa, post-M-BOOKS) + entity-image display (P18); not grounding evidence in the books spine
     kind: str = "entity"
 
 
@@ -153,7 +153,7 @@ class GenerationContext(BaseModel):
 
     Perturbations withhold evidence here only; the GradingReference is never
     modified.  Keeping these two types separate is a load-bearing invariant
-    (SPEC §3.2).
+    (SPEC-text §3.2).
     """
 
     entity_id: str

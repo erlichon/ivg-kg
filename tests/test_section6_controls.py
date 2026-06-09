@@ -1,5 +1,5 @@
 """
-SPEC §6 control harness — P0 subset (TS1).
+SPEC-text §6 control harness — P0 subset (TS1).
 
 Mapping of tests to §6 bullets:
 
@@ -9,7 +9,7 @@ Mapping of tests to §6 bullets:
   TestControl_ComposedManifestAttribution
       -> §6 mechanical: composed-manifest attribution (ablate two entities,
          verify per-claim attribution routes to the right perturbation entries
-         in manifest order; SPEC §4.4).
+         in manifest order; SPEC-text §4.4).
 
   TestControl_SchemaRoundTrip
       -> §6 mechanical: schema round-trip (GroundingRun JSON serialization,
@@ -147,7 +147,7 @@ _E2_TRIPLE_REF = TripleRef(subject_id=_E2, property_id="P50", object_id="Q_AUTHO
 
 
 class TestControlComposedManifestAttribution:
-    """§6 control: composed-manifest attribution (SPEC §4.4).
+    """§6 control: composed-manifest attribution (SPEC-text §4.4).
 
     Two perturbations on DIFFERENT entities in a single AblationManifest:
       - Entry 0: TextContentAbsence("Q_E1")  — ablates E1's description
@@ -378,7 +378,7 @@ def _build_full_reference() -> GradingReference:
 class TestControlGradeAgainstReferenceInvariantDataLayer:
     """§6 / §3.2 spine — data-layer assertion (P0-runnable half).
 
-    SPEC §3.2: ablation withholds evidence from the GenerationContext ONLY.
+    SPEC-text §3.2: ablation withholds evidence from the GenerationContext ONLY.
     The GradingReference (KG-full triples + curated content labels) is NEVER
     ablated; a fact hidden from the generator remains gradable against KG-full.
 
@@ -434,7 +434,7 @@ class TestControlGradeAgainstReferenceInvariantDataLayer:
         label_facts = [lb.fact for lb in ref_labels_for_qe]
         assert _CONTENT_FACT in label_facts, (
             f"The withheld fact {_CONTENT_FACT!r} must still be present in the "
-            "GradingReference content labels (SPEC §3.2)"
+            "GradingReference content labels (SPEC-text §3.2)"
         )
 
     def test_grading_reference_still_contains_structural_triple_after_knowledge_withhold(
@@ -456,7 +456,7 @@ class TestControlGradeAgainstReferenceInvariantDataLayer:
         p50_edges = [e for e in ref_edges if e.subject_id == _QE and e.property_id == "P50"]
         assert len(p50_edges) >= 1, (
             "GradingReference.snapshot must still contain the P50 triple for Q_E "
-            "after KnowledgeAbsence.withhold (SPEC §3.2)"
+            "after KnowledgeAbsence.withhold (SPEC-text §3.2)"
         )
 
     def test_original_ctx_is_unchanged_after_text_withhold(self) -> None:
@@ -521,7 +521,7 @@ class TestControlGradeAgainstReferenceInvariantDataLayer:
         # The grader's reference still has the fact.
         ref_label_facts = [lb.fact for lb in reference.content_labels if lb.entity_id == _QE]
         assert _CONTENT_FACT in ref_label_facts, (
-            "SPEC §3.2 violated: fact hidden from generator is also absent from "
+            "SPEC-text §3.2 violated: fact hidden from generator is also absent from "
             "GradingReference; ablation must only affect GenerationContext."
         )
 
@@ -547,7 +547,7 @@ class TestControlGradeAgainstReferenceInvariantDataLayer:
             if e.subject_id == _QE and e.property_id == "P50"
         ]
         assert len(ref_p50) >= 1, (
-            "SPEC §3.2 violated: P50 edge hidden from generator is also absent from "
+            "SPEC-text §3.2 violated: P50 edge hidden from generator is also absent from "
             "GradingReference.snapshot.edges"
         )
 

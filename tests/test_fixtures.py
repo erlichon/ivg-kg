@@ -12,8 +12,9 @@ Acceptance criteria (from task brief):
     referenced by an edge exists as a node, and the multi-hop claim's
     path nodes/edges are all present in the elements.
 (g) Calling mock_grounding_run() twice returns independent objects.
-No image_path / taxa content anywhere (assert none of the nodes carry an
-image_path and no claim uses IMAGE_CONTENT).
+Books-only: NO claim uses IMAGE_CONTENT support, but at least one node carries an
+image_path (a P18 author portrait) to demonstrate entity-image display (SPEC-text
+§4.5) — the image is a demo-visual, not grounding evidence.
 """
 from ivg_kg.mock.fixtures import mock_grounding_run, mock_subgraph_elements
 from ivg_kg.schema import ClaimStatus, GroundingRun, SupportSource
@@ -147,22 +148,32 @@ def test_independent_objects_on_successive_calls():
 
 
 # ---------------------------------------------------------------------------
-# No image_path or IMAGE_CONTENT anywhere
+# Books-only grading, but entity-image display is demonstrated (SPEC-text §4.5)
 # ---------------------------------------------------------------------------
 
 
-def test_no_image_path_or_image_content():
+def test_no_claim_uses_image_content_support():
+    """Books is a TEXT-vs-knowledge slice: no claim grades against an image."""
     run = mock_grounding_run()
     for claim in run.claims:
         assert claim.support_source != SupportSource.IMAGE_CONTENT, (
             f"Claim {claim.claim_id} uses IMAGE_CONTENT — forbidden in books fixture"
         )
 
+
+def test_at_least_one_node_has_image_path():
+    """Entity-image display (SPEC-text §4.5): >=1 node carries an image_path.
+
+    The image is a demo-visual (P18 author portrait), not grounding evidence.
+    """
     elements = mock_subgraph_elements()
-    for element in elements:
-        data = element["data"]
-        assert "image_path" not in data or data.get("image_path") is None, (
-            f"Element {data.get('id')} has image_path — forbidden in books fixture"
+    with_image = [
+        e["data"] for e in elements if e["data"].get("image_path")
+    ]
+    assert with_image, "Expected at least one node with an image_path (demo-visual)"
+    for data in with_image:
+        assert isinstance(data["image_path"], str) and data["image_path"], (
+            f"Node {data.get('id')} has a non-string/empty image_path"
         )
 
 

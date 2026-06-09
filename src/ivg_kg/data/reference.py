@@ -1,7 +1,7 @@
 """DA4 — Grading-reference assembly.
 
 Builds the `GradingReference` — the never-ablated ground truth the classifier
-grades every claim against (SPEC §3.2 invariant).  This module provides:
+grades every claim against (SPEC-text §3.2 invariant).  This module provides:
 
   - ``assemble_reference`` — construct a GradingReference from a KG-full
     snapshot plus curated ContentLabels.  The snapshot MUST be KG-full (never
@@ -19,15 +19,16 @@ grades every claim against (SPEC §3.2 invariant).  This module provides:
     derived from snapshot_id + a sorted hash of the content labels.
 
   - ``freeze_reference`` / ``load_reference`` — JSON-only persistence that
-    mirrors the SPEC §3.3 frozen-slice layout:
+    mirrors the SPEC-text §3.3 frozen-slice layout:
         <dir>/snapshot.json          (via DA2's freeze_snapshot)
         <dir>/content_labels.json    (deterministic JSON array)
 
-Invariant #1 (SPEC §3.2): this module builds the FULL, never-ablated
+Invariant #1 (SPEC-text §3.2): this module builds the FULL, never-ablated
 reference.  No withhold/ablate API is exposed here.
 
-Invariant #8: only TEXT modality labels are authored in P0 (books slice).
-IMAGE labels are taxa/P181 concerns handled post-M-BOOKS (DA6).
+Books-first gate: only TEXT modality labels are authored in P0 (books slice).
+IMAGE labels are image-axis concerns (artwork-primary / taxa-fallback) handled
+post-M-BOOKS in the separate image specs/tasks.
 
 Imports: ivg_kg.schema, ivg_kg.data.graph_store, stdlib only.
 No provider SDKs, no network, no pickle.
@@ -56,7 +57,7 @@ def assemble_reference(
     The snapshot passed in MUST be the KG-full (never an ablated subgraph).
     Perturbations that withhold triples or text content act solely on the
     generation context (GenerationContext) and never on this reference.  That
-    separation is the load-bearing invariant of SPEC §3.2.
+    separation is the load-bearing invariant of SPEC-text §3.2.
 
     Parameters
     ----------
@@ -64,8 +65,8 @@ def assemble_reference(
         KG-full snapshot for the domain entity.  Must not be an ablated
         subgraph.
     content_labels:
-        Curated content-only labels (TEXT for books; IMAGE for taxa in P1+).
-        May be empty for snapshots that have no content-only facts.
+        Curated content-only labels (TEXT for books; IMAGE for the gated image
+        axis, post-M-BOOKS).  May be empty for snapshots with no content-only facts.
 
     Returns
     -------
@@ -89,11 +90,11 @@ def make_text_content_label(
 
     Books content-only facts are facts the triples omit but the description
     carries: genre/form ("is this a play or a novel?"), tradition/affiliation,
-    scope/structure ("how many volumes?"), and descriptive role (SPEC §4.1).
+    scope/structure ("how many volumes?"), and descriptive role (SPEC-text §4.1).
 
     Stamping modality=TEXT is done here unconditionally.  Do NOT use this
-    helper to author IMAGE labels; those are taxa-specific and handled in
-    DA6 (post-M-BOOKS).
+    helper to author IMAGE labels; those belong to the gated image axis
+    (artwork-primary / taxa-fallback) and are handled post-M-BOOKS.
 
     Parameters
     ----------
@@ -128,8 +129,9 @@ def author_books_content_labels(
     as the input (deterministic; no sorting).  This is hand-curation support,
     not extraction — the caller controls ordering.
 
-    Only TEXT modality labels are produced here (Invariant #8).  Do NOT pass
-    image-derived facts; those belong to DA6 (taxa/range-map, post-M-BOOKS).
+    Only TEXT modality labels are produced here (books-first gate).  Do NOT pass
+    image-derived facts; those belong to the gated image axis (artwork-primary /
+    taxa-fallback), built post-M-BOOKS.
 
     Parameters
     ----------

@@ -408,3 +408,60 @@ def test_store_data_is_json_serializable():
     for claim in run.claims:
         # The store would hold the claim_id string
         json.dumps(claim.claim_id)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Entity-detail pane: show the entity image when present (SPEC-text §4.5)
+# ---------------------------------------------------------------------------
+
+
+def test_node_detail_content_renders_image_when_present():
+    """A tapped node carrying image_path renders an html.Img with that src."""
+    from app.callbacks import node_detail_content
+    from dash import html
+
+    node_data = {
+        "id": "Q22222",
+        "label": "Elara Voss",
+        "description": "a novelist",
+        "image_path": "https://example.org/portrait.jpg",
+    }
+    result = node_detail_content(node_data)
+    imgs = [c for c in result.children if isinstance(c, html.Img)]
+    assert len(imgs) == 1, "Expected exactly one html.Img for a node with image_path"
+    assert imgs[0].src == "https://example.org/portrait.jpg"
+
+
+def test_node_detail_content_no_image_when_absent():
+    """A node without image_path renders no html.Img (no broken-image icon)."""
+    from app.callbacks import node_detail_content
+    from dash import html
+
+    result = node_detail_content({"id": "Q1", "label": "book", "description": "a book"})
+    imgs = [c for c in result.children if isinstance(c, html.Img)]
+    assert imgs == [], "No image_path -> no html.Img"
+
+
+def test_node_detail_content_placeholder_when_no_tap():
+    """node_data=None (initial load / no tap) returns a placeholder, not a crash."""
+    from app.callbacks import node_detail_content
+
+    result = node_detail_content(None)
+    assert result is not None
+
+
+def test_cb4_node_detail_output_of_exactly_one_callback():
+    """node-detail.children is written by exactly one callback (CB4); CB4 does
+    not write the selected-claim store (no circular dependency)."""
+    from app.app import make_app
+
+    app = make_app()
+    detail_outputs = [
+        k for k in app.callback_map if "node-detail" in k and "children" in k
+    ]
+    assert len(detail_outputs) == 1, (
+        f"node-detail.children should be Output of exactly 1 callback, got {detail_outputs}"
+    )
+    # The store remains written by exactly one callback (CB1) — CB4 didn't touch it.
+    store_outputs = [k for k in app.callback_map if "selected-claim" in k and "data" in k]
+    assert len(store_outputs) == 1

@@ -1,4 +1,4 @@
-"""Dash application entry point for IVG-KG (SPEC §4.5).
+"""Dash application entry point for IVG-KG (SPEC-text §4.5).
 
 make_app() builds and returns a fully configured Dash instance (useful for
 testing without starting a server).

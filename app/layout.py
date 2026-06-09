@@ -1,4 +1,4 @@
-"""Layout factory for the IVG-KG Dash app (SPEC §4.5, §3.3).
+"""Layout factory for the IVG-KG Dash app (SPEC-text §4.5, §3.3).
 
 get_layout(run, elements) composes the three panels and a dcc.Store.
 get_perturbation_controls() renders controls generically from the perturbation

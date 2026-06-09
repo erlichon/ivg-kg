@@ -35,7 +35,7 @@ class TextContentAbsence(Perturbation):
 
         The returned context always owns a distinct triples list so that
         mutating it cannot affect the caller's original context
-        (Invariant #1, SPEC §3.2).
+        (Invariant #1, SPEC-text §3.2).
         """
         if ctx.entity_id == self.entity_id:
             return ctx.model_copy(update={"description": None, "triples": list(ctx.triples)})

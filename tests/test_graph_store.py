@@ -604,3 +604,41 @@ class TestNxToCytoElements:
         elements = nx_to_cyto_elements(snap)
         node_ids = [e["data"]["id"] for e in elements if "source" not in e["data"]]
         assert len(node_ids) == len(set(node_ids)), "Duplicate node ids in cyto elements"
+
+    def test_surfaces_image_path_and_description_when_present(self):
+        """Node data carries image_path + description so the UI entity-detail
+        pane can show the entity image (SPEC-text §4.5)."""
+        snap = KGSnapshot(
+            snapshot_id="img-snap",
+            slice="books",
+            domain_qid="Q571",
+            nodes=[
+                KGNode(
+                    id="Q1",
+                    label="author",
+                    description="a novelist",
+                    image_path="https://example.org/portrait.jpg",
+                    kind="entity",
+                ),
+                KGNode(id="Q2", label="book", kind="entity"),
+            ],
+            edges=[
+                KGEdge(
+                    subject_id="Q2",
+                    property_id="P50",
+                    property_label="author",
+                    object_id="Q1",
+                    object_label="author",
+                    value_type=ValueType.ITEM,
+                ),
+            ],
+        )
+        nodes = {
+            e["data"]["id"]: e["data"]
+            for e in nx_to_cyto_elements(snap)
+            if "source" not in e["data"]
+        }
+        assert nodes["Q1"]["image_path"] == "https://example.org/portrait.jpg"
+        assert nodes["Q1"]["description"] == "a novelist"
+        # Node without an image_path must not carry the key (kept clean).
+        assert "image_path" not in nodes["Q2"]

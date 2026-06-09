@@ -116,7 +116,7 @@ class TestTextContentAbsence:
         assert result is not ctx  # still a new object
 
     # ------------------------------------------------------------------
-    # Regression: triples list aliasing (Finding #1, SPEC §3.2)
+    # Regression: triples list aliasing (Finding #1, SPEC-text §3.2)
     # ------------------------------------------------------------------
 
     def test_triples_list_is_distinct_on_matching_branch(self) -> None:
@@ -183,7 +183,7 @@ class TestImageContentAbsence:
         assert result is not ctx
 
     # ------------------------------------------------------------------
-    # Regression: triples list aliasing (Finding #1, SPEC §3.2)
+    # Regression: triples list aliasing (Finding #1, SPEC-text §3.2)
     # ------------------------------------------------------------------
 
     def test_triples_list_is_distinct_on_matching_branch(self) -> None:

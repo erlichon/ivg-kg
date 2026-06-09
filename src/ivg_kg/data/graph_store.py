@@ -370,15 +370,19 @@ def nx_to_cyto_elements(snapshot: KGSnapshot) -> list[dict[str, Any]]:
     node_elements: list[dict[str, Any]] = []
     for node_id in sorted(g.nodes()):
         data = g.nodes[node_id]
-        node_elements.append(
-            {
-                "data": {
-                    "id": node_id,
-                    "label": data.get("label", node_id),
-                    "kind": data.get("kind", "entity"),
-                }
-            }
-        )
+        node_data: dict[str, Any] = {
+            "id": node_id,
+            "label": data.get("label", node_id),
+            "kind": data.get("kind", "entity"),
+        }
+        # Surface description + image_path when present so the UI entity-detail
+        # pane can show them (SPEC-text §4.5: show the entity image when present).
+        # image_path is a demo-visual (P18), not grounding evidence in the books spine.
+        if data.get("description") is not None:
+            node_data["description"] = data["description"]
+        if data.get("image_path") is not None:
+            node_data["image_path"] = data["image_path"]
+        node_elements.append({"data": node_data})
 
     # edges — sorted by id for determinism
     edge_elements: list[dict[str, Any]] = []

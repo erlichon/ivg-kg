@@ -1,4 +1,4 @@
-"""DA3 — Books slice pipeline: enumerate, filter, build, freeze (SPEC §4.1, §8).
+"""DA3 — Books slice pipeline: enumerate, filter, build, freeze (SPEC-text §4.1, §8).
 
 Public API
 ----------
@@ -18,7 +18,7 @@ build_books_slice(client, *, slice_id, limit=50, band=SITELINK_BAND) -> KGSnapsh
     Orchestrates the full pull-filter-build pipeline:
     1. Run enumeration query via client.run_query().
     2. Parse candidates (QID + sitelink count); apply sitelink_band_filter (Python
-       re-check; SPEC §4.1 requires both server-side and Python filter).
+       re-check; SPEC-text §4.1 requires both server-side and Python filter).
     3. Sort candidates by QID for determinism; take the first `limit`.
     4. Run the per-entity triples query for the selected QIDs.
     5. Apply keep_property_type filter; map kept datatype -> value_type via
@@ -47,8 +47,8 @@ main() / __main__ entry point
 
 Design invariants
 -----------------
-- Books only: Q571 (Invariant #8).  No taxa slice, no range-map properties,
-  no image fetch.
+- Books only: Q571 (books-first gate).  No image-axis slice (artwork/taxa),
+  no image-bearing properties, no image fetch — that is built post-M-BOOKS.
 - WDQS + QLever compatible: no wikibase:label SERVICE in any query.
 - No pickle.  No network in tests (client injected as parameter).
 - Deterministic: candidates sorted by QID; frozen output stable for fixed input.
@@ -112,7 +112,7 @@ def enumeration_query() -> str:
     (not available on QLever).  Returns sitelinks via wikibase:sitelinks.
 
     Sitelink band is applied server-side with a FILTER; Python re-check is
-    performed in build_books_slice via sitelink_band_filter (SPEC §4.1).
+    performed in build_books_slice via sitelink_band_filter (SPEC-text §4.1).
 
     Result columns: item (URI), sitelinks (literal integer string).
     """
@@ -279,7 +279,7 @@ def _parse_triple_rows(
         if not property_id:
             continue
 
-        # Property datatype filter (SPEC §4.1; Invariant #4 extension)
+        # Property datatype filter (SPEC-text §4.1; Invariant #4 extension)
         raw_pt = row.get("pt", "")
         if not keep_property_type(raw_pt):
             continue
@@ -365,7 +365,7 @@ def build_books_slice(
     enum_q = enumeration_query()
     raw_enum_rows = client.run_query(enum_q)
 
-    # Step 2: Parse candidates and apply Python sitelink re-check (SPEC §4.1)
+    # Step 2: Parse candidates and apply Python sitelink re-check (SPEC-text §4.1)
     candidates = _parse_enum_rows(raw_enum_rows)
     # Adapt to sitelink_band_filter's expected dict shape (count_key="sitelinks")
     in_band = sitelink_band_filter(candidates, band=band, count_key="sitelinks")
@@ -453,11 +453,11 @@ def content_structure_overlap_report(snapshot: KGSnapshot) -> dict[str, Any]:
     """Return a descriptive overlap report for a frozen books snapshot.
 
     Checks whether each subject entity has:
-    - A non-empty description (CONTENT axis, SPEC §11).
+    - A non-empty description (CONTENT axis, SPEC-text §11).
     - At least one outgoing triple (STRUCTURE axis).
 
     The report re-confirms that the books slice carries content (descriptions)
-    alongside structure (triples), the non-redundancy rationale of SPEC §10/§11.
+    alongside structure (triples), the non-redundancy rationale of SPEC-text §10/§11.
 
     Parameters
     ----------

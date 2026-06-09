@@ -1,4 +1,4 @@
-"""P0 grounding backend stub (SPEC §4.3, seam §3.1).
+"""P0 grounding backend stub (SPEC-text §4.3, seam §3.1).
 
 Defines the stable entry point for the grounding pipeline.  The two-graph
 signature encodes the §3.2 invariant: the immutable GradingReference (full

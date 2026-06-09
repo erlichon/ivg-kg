@@ -1,5 +1,5 @@
 """
-ivg_kg.perturbation — Perturbation interface, registry, and manifest (SPEC §4.4).
+ivg_kg.perturbation — Perturbation interface, registry, and manifest (SPEC-text §4.4).
 
 Importing this package registers all three built-in perturbation types so that
 ``AblationManifest.from_json`` can reconstruct any of them via the registry.

@@ -1,4 +1,4 @@
-"""Mock fixtures for the IVG-KG Dash skeleton (UI1 / SPEC §3.3, §4.5).
+"""Mock fixtures for the IVG-KG Dash skeleton (UI1 / SPEC-text §3.3, §4.5).
 
 Provides a hardcoded, fully deterministic books-slice GroundingRun and the
 corresponding dash-cytoscape subgraph elements.  No randomness, no I/O, no
@@ -43,6 +43,14 @@ _BOOK_DESC = "A 1923 novel by Elara Voss, associated with the Symbolist movement
 _AUTHOR_QID = "Q22222"
 _AUTHOR_LABEL = "Elara Voss"
 _AUTHOR_DESC = "German novelist and poet (1891-1956), central figure of Symbolism."
+# Illustrative author-portrait (P18) for the fictional author node, so the
+# skeleton demonstrates entity-image display (SPEC-text §4.5). The image is a
+# demo-visual only — NOT grounding evidence in the books spine. Real public-domain
+# Commons portrait standing in for the invented author.
+_AUTHOR_IMAGE = (
+    "https://commons.wikimedia.org/wiki/Special:FilePath/"
+    "CassandraAusten-JaneAusten(c.1810)_hires.jpg"
+)
 
 _TRADITION_QID = "Q33333"
 _TRADITION_LABEL = "Symbolist movement"
@@ -95,7 +103,7 @@ def _claim_retrieved_text_content() -> ClaimRecord:
     """Claim 2: RETRIEVED / TEXT_CONTENT — genre/tradition from description.
 
     No direct triple for tradition membership; the grounding is derived from
-    the entity description text (SPEC §3.2 content axis, Invariant #2).
+    the entity description text (SPEC-text §3.2 content axis, Invariant #2).
     """
     return ClaimRecord(
         claim_id="c2",
@@ -265,11 +273,21 @@ def mock_subgraph_elements() -> list[dict]:
     so that UI2 callbacks can map a claim's GroundingPath to specific elements
     for stylesheet-based highlighting without mutating the global stylesheet.
 
-    No image_path fields; no taxa/image content (books-only hard gate).
+    The author node carries an ``image_path`` (a P18 author portrait) so the
+    skeleton demonstrates the entity-detail image display (SPEC-text §4.5). The
+    image is a demo-visual only — books remain a TEXT-vs-knowledge slice and no
+    claim grades against an image (no IMAGE_CONTENT support; books-first gate).
     """
     nodes: list[dict] = [
         {"data": {"id": _BOOK_QID, "label": _BOOK_LABEL, "description": _BOOK_DESC}},
-        {"data": {"id": _AUTHOR_QID, "label": _AUTHOR_LABEL, "description": _AUTHOR_DESC}},
+        {
+            "data": {
+                "id": _AUTHOR_QID,
+                "label": _AUTHOR_LABEL,
+                "description": _AUTHOR_DESC,
+                "image_path": _AUTHOR_IMAGE,
+            }
+        },
         {
             "data": {
                 "id": _TRADITION_QID,

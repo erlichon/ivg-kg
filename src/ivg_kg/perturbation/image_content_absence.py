@@ -5,9 +5,10 @@ Modality: IMAGE
 Withhold semantics: if ctx.entity_id == entity_id, return a copy with
 image_path=None; otherwise return ctx unchanged (as a copy).
 
-NOTE: This class defines the PERTURBATION-SEAM contract only (SPEC §4.4,
-Invariant #8).  Taxa/image-fetching/rasterization/P181 query logic is NOT
-included here and MUST NOT be added to this file.
+NOTE: This class defines the PERTURBATION-SEAM contract only (SPEC-text §4.4,
+books-first gate).  The image-axis data/grading (artwork-primary, taxa-fallback)
+is built post-M-BOOKS in the separate image specs/tasks; no image-fetching /
+rasterization / artwork-or-P181 query logic belongs in this file.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from .base import Perturbation, register_perturbation
 
 @register_perturbation
 class ImageContentAbsence(Perturbation):
-    """Withholds the range-map image from the generation context."""
+    """Withholds the entity image from the generation context (generic seam)."""
 
     type_name: ClassVar[str] = "image_content_absence"
     modality: ClassVar[Modality] = Modality.IMAGE
@@ -39,7 +40,7 @@ class ImageContentAbsence(Perturbation):
 
         The returned context always owns a distinct triples list so that
         mutating it cannot affect the caller's original context
-        (Invariant #1, SPEC §3.2).
+        (Invariant #1, SPEC-text §3.2).
         """
         if ctx.entity_id == self.entity_id:
             return ctx.model_copy(update={"image_path": None, "triples": list(ctx.triples)})

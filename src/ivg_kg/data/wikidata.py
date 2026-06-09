@@ -1,5 +1,5 @@
 """
-Wikidata pull client for IVG-KG (SPEC §4.1).
+Wikidata pull client for IVG-KG (SPEC-text §4.1).
 
 Public API
 ----------

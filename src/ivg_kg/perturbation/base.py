@@ -1,8 +1,8 @@
 """
-PT1: Perturbation ABC, registry, and AblationManifest (SPEC §4.4).
+PT1: Perturbation ABC, registry, and AblationManifest (SPEC-text §4.4).
 
 All perturbation types operate on GenerationContext ONLY — never on frozen
-KG snapshots or grading references (Invariant #1, SPEC §3.2).
+KG snapshots or grading references (Invariant #1, SPEC-text §3.2).
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ class Perturbation(ABC):
     - Implement ``withhold``, ``manifest_entry``, and ``from_entry``.
 
     ``withhold`` MUST return a NEW ``GenerationContext``; it MUST NOT mutate
-    its input (Invariant #1, SPEC §3.2).
+    its input (Invariant #1, SPEC-text §3.2).
     """
 
     type_name: ClassVar[str]
