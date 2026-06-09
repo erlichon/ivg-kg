@@ -1,34 +1,57 @@
-"""Subgraph panel — dash_cytoscape graph with path-highlighting support.
+"""Subgraph panel (Knowledge pillar) — SPEC-text §4.5.
 
-BASE_STYLESHEET is the module-level default stylesheet; it must NEVER be
-mutated (Invariant #12).
-
-highlight_stylesheet(base, path_edge_ids, path_node_ids) returns a NEW list
-equal to base + appended highlight selectors — it never modifies base.
+Renders the KG neighbourhood as dash-cytoscape. Selected claims' support paths
+are highlighted by **appending** selectors to BASE_STYLESHEET — the base is
+NEVER mutated. Hue on a path edge encodes the claim's STATUS; selected-claim
+identity is an ACCENT outline + a numeric badge on the claim's anchor node
+(never hue). Literal value nodes are styled distinctly. Tapping a node opens the
+entity-detail pane (static placeholder image + label/description) and zooms to
+the node + its 1st-degree neighbours (under SUBGRAPH_NODE_CAP).
 """
 from __future__ import annotations
 
 import dash_cytoscape
 from dash import html
 
-# ---------------------------------------------------------------------------
-# Base stylesheet (module-level; must not be mutated anywhere — Invariant #12)
-# ---------------------------------------------------------------------------
+from app import theme
+from ivg_kg.config import SUBGRAPH_NODE_CAP
+from ivg_kg.schema import ClaimRecord, SupportSource
 
+PLACEHOLDER_IMG = "/assets/placeholder_entity.svg"
+
+# --- base stylesheet (module-level; never mutated — append only) -------------
 BASE_STYLESHEET: list[dict] = [
     {
         "selector": "node",
         "style": {
             "label": "data(label)",
-            "background-color": "#313244",
-            "border-color": "#585b70",
+            "background-color": "#21262d",
+            "border-color": theme.BORDER,
             "border-width": 1,
-            "color": "#cdd6f4",
-            "font-size": "11px",
+            "color": theme.TEXT,
+            "font-family": theme.MONO,
+            "font-size": "10px",
             "text-valign": "center",
             "text-halign": "center",
-            "width": 60,
-            "height": 60,
+            "text-wrap": "wrap",
+            "text-max-width": "90px",
+            "width": 54,
+            "height": 54,
+        },
+    },
+    {
+        # literal value nodes — styled distinctly (rectangle, dashed, muted).
+        "selector": 'node[kind = "literal"]',
+        "style": {
+            "shape": "round-rectangle",
+            "background-color": "#161b22",
+            "border-color": theme.FAINT,
+            "border-width": 1,
+            "border-style": "dashed",
+            "color": theme.MUTED,
+            "font-style": "italic",
+            "width": 84,
+            "height": 38,
         },
     },
     {
@@ -37,115 +60,231 @@ BASE_STYLESHEET: list[dict] = [
             "label": "data(label)",
             "curve-style": "bezier",
             "target-arrow-shape": "triangle",
-            "target-arrow-color": "#585b70",
-            "line-color": "#585b70",
-            "font-size": "9px",
-            "color": "#a6adc8",
+            "target-arrow-color": theme.FAINT,
+            "line-color": theme.FAINT,
+            "font-family": theme.MONO,
+            "font-size": "8px",
+            "color": theme.MUTED,
             "text-rotation": "autorotate",
             "width": 1.5,
         },
     },
+    {
+        # de-emphasised neighbours (1st-degree context, not on a claim path).
+        "selector": 'node[faded = "1"]',
+        "style": {"opacity": 0.45},
+    },
 ]
+
+
+def support_edges_and_nodes(claim: ClaimRecord) -> tuple[list[str], list[str], str | None]:
+    """Return (support_edge_ids, support_node_ids, anchor_node_id) for a claim.
+
+    Edge ids follow the "<subj>-<prop>-<obj>" convention. Direct-triple claims
+    (no stored path) have their supporting edge reconstructed from claim_key.
+    """
+    anchor = claim.linked_entities[0].id if claim.linked_entities else None
+    if claim.grounding_path.edges:
+        eids = [
+            f"{pe.subject_id}-{pe.property_id}-{pe.object_id}"
+            for pe in claim.grounding_path.edges
+        ]
+        return eids, list(claim.grounding_path.node_ids), anchor
+    if claim.support_source == SupportSource.DIRECT_TRIPLE and claim.claim_key:
+        parts = claim.claim_key.split("|")
+        if len(parts) == 3 and parts[2].startswith("Q"):
+            head, rel, val = parts
+            return [f"{head}-{rel}-{val}"], [head, val], anchor
+    return [], ([anchor] if anchor else []), anchor
 
 
 def highlight_stylesheet(
     base: list[dict],
-    path_edge_ids: list[str],
-    path_node_ids: list[str],
+    selected_claims: list[ClaimRecord],
+    node_labels: dict[str, str],
 ) -> list[dict]:
-    """Return base + appended highlight selectors for the given path elements.
+    """Return base + appended highlight selectors (PURE; base never mutated).
 
-    PURE function — never mutates ``base``.  Returns a NEW list.
-    (Invariant #12: appending, never editing the global stylesheet.)
-
-    Parameters
-    ----------
-    base:
-        The current base stylesheet (must not be modified).
-    path_edge_ids:
-        Edge element ids to highlight (format: "<subj>-<pid>-<obj>").
-    path_node_ids:
-        Node element ids to highlight.
-
-    Returns
-    -------
-    list[dict]
-        A new list equal to ``base`` followed by the highlight selector dicts.
+    Path edges take the claim's STATUS hue; support nodes get a status-hue ring;
+    each selected claim's anchor node gets the ACCENT outline + a numeric badge
+    (identity != hue). Multiple claims sharing an anchor combine their badges.
     """
     appended: list[dict] = []
+    anchor_badges: dict[str, list[str]] = {}
+    path_node_hue: dict[str, str] = {}
 
-    for nid in path_node_ids:
-        appended.append(
-            {
-                "selector": f'node[id = "{nid}"]',
-                "style": {
-                    "background-color": "#89b4fa",
-                    "border-color": "#74c7ec",
-                    "border-width": 3,
-                    "color": "#1e1e2e",
-                    "font-weight": "bold",
-                },
-            }
-        )
-
-    for eid in path_edge_ids:
-        appended.append(
-            {
+    for badge, claim in enumerate(selected_claims, start=1):
+        hue = theme.status_color(claim.status.value)
+        edge_ids, node_ids, anchor = support_edges_and_nodes(claim)
+        for eid in edge_ids:
+            appended.append({
                 "selector": f'edge[id = "{eid}"]',
                 "style": {
-                    "line-color": "#f38ba8",
-                    "target-arrow-color": "#f38ba8",
-                    "width": 3,
-                    "color": "#f38ba8",
-                    "font-weight": "bold",
+                    "line-color": hue,
+                    "target-arrow-color": hue,
+                    "width": 4,
+                    "z-index": 20,
+                    "opacity": 1,
                 },
-            }
-        )
+            })
+        for nid in node_ids:
+            path_node_hue[nid] = hue
+        if anchor:
+            anchor_badges.setdefault(anchor, []).append(str(badge))
 
-    # Return a brand-new list — do NOT do base += appended (would mutate base).
+    # status-hue ring on support nodes (shows the path; hue == status)
+    for nid, hue in path_node_hue.items():
+        appended.append({
+            "selector": f'node[id = "{nid}"]',
+            "style": {"border-color": hue, "border-width": 3, "opacity": 1},
+        })
+    # accent outline + numeric badge on anchors (identity; wins over hue ring)
+    for nid, badges in anchor_badges.items():
+        label = node_labels.get(nid, nid)
+        appended.append({
+            "selector": f'node[id = "{nid}"]',
+            "style": {
+                "border-color": theme.ACCENT,
+                "border-width": 5,
+                "opacity": 1,
+                "label": f"{label}  [{','.join(badges)}]",
+                "font-weight": "bold",
+            },
+        })
     return list(base) + appended
 
 
-def get_subgraph_panel(elements: list[dict]) -> html.Div:
-    """Render the subgraph panel containing a Cytoscape graph.
+def node_labels_from_elements(elements: list[dict]) -> dict[str, str]:
+    """Map node id -> label from a cytoscape element list."""
+    return {
+        e["data"]["id"]: e["data"].get("label", e["data"]["id"])
+        for e in elements
+        if "source" not in e["data"]
+    }
 
-    The Cytoscape component carries id="subgraph" and the BASE_STYLESHEET.
-    CB2 will swap the stylesheet (via Output) to base + highlight selectors
-    for the selected claim path.
+
+def ego_elements(elements: list[dict], node_id: str, cap: int = SUBGRAPH_NODE_CAP) -> list[dict]:
+    """Return the tapped node + its 1st-degree neighbours (edges between them).
+
+    Neighbours beyond the cap are dropped (node-cap; SPEC-text §4.5 #3).
     """
+    edges = [e for e in elements if "source" in e["data"]]
+    nodes = {e["data"]["id"]: e for e in elements if "source" not in e["data"]}
+    keep = {node_id}
+    for e in edges:
+        s, t = e["data"]["source"], e["data"]["target"]
+        if s == node_id:
+            keep.add(t)
+        elif t == node_id:
+            keep.add(s)
+    if len(keep) > cap:
+        keep = set(list(keep)[:cap])
+    out: list[dict] = []
+    for nid in keep:
+        if nid in nodes:
+            node = {"data": dict(nodes[nid]["data"])}
+            if nid != node_id:
+                node["data"]["faded"] = "1"  # neighbours de-emphasised
+            out.append(node)
+    for e in edges:
+        if e["data"]["source"] in keep and e["data"]["target"] in keep:
+            out.append(e)
+    return out
+
+
+def node_detail_content(node_data: dict | None) -> html.Div:
+    """Entity-detail pane: static placeholder image + label/description.
+
+    The image is a STATIC LOCAL placeholder asset (no image axis / no network).
+    Literal value nodes show their value chip instead of an image.
+    """
+    if not node_data:
+        return html.Div(
+            "Tap a node to inspect the entity.",
+            style={"color": theme.FAINT, "fontStyle": "italic", "fontSize": "0.8em"},
+        )
+    label = node_data.get("label") or node_data.get("id", "?")
+    kind = node_data.get("kind", "entity")
+    desc = node_data.get("description")
+
+    if kind == "literal":
+        media: html.Div = html.Div(
+            label,
+            style={
+                "fontFamily": theme.MONO, "color": theme.MUTED, "fontStyle": "italic",
+                "border": f"1px dashed {theme.FAINT}", "borderRadius": "6px",
+                "padding": "10px", "textAlign": "center",
+            },
+        )
+        title = "literal value"
+    else:
+        media = html.Img(
+            src=PLACEHOLDER_IMG,
+            alt=f"{label} (placeholder)",
+            style={"width": "108px", "height": "120px", "borderRadius": "6px",
+                   "flexShrink": "0"},
+        )
+        title = label
+
+    body: list = [
+        html.Div(title, style={"color": theme.TEXT, "fontWeight": "bold",
+                               "marginBottom": "4px"}),
+    ]
+    if desc:
+        body.append(html.Div(desc, style={"color": theme.MUTED, "fontSize": "0.8em",
+                                           "lineHeight": "1.4"}))
+    return html.Div(
+        [media, html.Div(body, style={"marginLeft": "12px"})],
+        style={"display": "flex", "alignItems": "flex-start"},
+    )
+
+
+def get_subgraph_panel(elements: list[dict]) -> html.Div:
+    """Compose the Subgraph panel (overview state = all claim nodes + neighbours)."""
     return html.Div(
         [
-            html.H3(
-                "Knowledge Subgraph",
-                style={"color": "#cdd6f4", "marginBottom": "12px", "fontSize": "1.1em"},
+            html.Div(
+                [
+                    html.Span("SUBGRAPH", style={"color": theme.MUTED, "fontSize": "0.75em",
+                                                 "letterSpacing": "0.1em"}),
+                    html.Button(
+                        "⟲ reset view",
+                        id="reset-view",
+                        n_clicks=0,
+                        style={
+                            "float": "right", "background": theme.PANEL_ALT,
+                            "color": theme.MUTED, "border": f"1px solid {theme.BORDER}",
+                            "borderRadius": "4px", "fontSize": "0.72em",
+                            "padding": "2px 8px", "cursor": "pointer",
+                            "fontFamily": theme.MONO,
+                        },
+                    ),
+                ],
+                style={"marginBottom": "8px", "overflow": "hidden"},
             ),
             html.Div(
-                "Click a claim to highlight its support path.",
-                style={"color": "#a6adc8", "fontSize": "0.85em", "marginBottom": "10px"},
+                "Select claims (left) to brush their support paths · tap a node to zoom + inspect.",
+                style={"color": theme.FAINT, "fontSize": "0.72em", "marginBottom": "8px"},
             ),
             dash_cytoscape.Cytoscape(
                 id="subgraph",
                 elements=elements,
                 stylesheet=BASE_STYLESHEET,
-                layout={"name": "cose"},
-                style={"width": "100%", "height": "420px", "background": "#1e1e2e"},
+                layout={"name": "cose", "animate": False, "padding": 20},
+                style={"width": "100%", "height": "430px", "background": theme.PANEL_ALT,
+                       "border": f"1px solid {theme.BORDER}", "borderRadius": "6px"},
                 responsive=True,
             ),
             html.Div(
-                id="node-detail",
+                node_detail_content(None),
+                id="entity-detail",
                 style={
-                    "marginTop": "10px",
-                    "color": "#a6adc8",
-                    "fontSize": "0.85em",
-                    "minHeight": "24px",
+                    "marginTop": "10px", "minHeight": "70px",
+                    "background": theme.PANEL_ALT, "border": f"1px solid {theme.BORDER}",
+                    "borderRadius": "6px", "padding": "10px",
                 },
             ),
         ],
         id="subgraph-panel",
-        style={
-            "padding": "16px",
-            "background": "#181825",
-            "borderRadius": "6px",
-            "height": "100%",
-        },
+        style=theme.panel_style(height="100%"),
     )

@@ -67,6 +67,19 @@ class ValueType(StrEnum):
     STRING = "string"
 
 
+class Condition(StrEnum):
+    """Generation-context condition a run was produced under (SPEC-text §4.2).
+
+    Each run's answer is generated from the (possibly ablated) context for this
+    condition; the diagnostics aggregate the N draws across conditions (§4.8).
+    """
+
+    FULL = "full"
+    KNOWLEDGE_ABSENT = "knowledge-absent"
+    CONTENT_ABSENT = "content-absent"
+    IMAGE_ABSENT = "image-absent"  # image axis only; unused in the books spine
+
+
 # ---------------------------------------------------------------------------
 # Utility reference selector
 # ---------------------------------------------------------------------------
@@ -231,8 +244,11 @@ class ClaimRecord(BaseModel):
         active_perturbations: Manifest-entry ids whose withheld triples/content
             touch at least one of this claim's linked entities.
         entailment_score: NLI/visual-probe gate score (MiniCheck or visual probe).
-        spurious_path: True when a candidate path/evidence existed but the
-            entailment gate rejected it, yielding FABRICATED status.
+        claim_key: Canonical (head_entity, relation, normalized_value) key that
+            aligns "the same claim" across draws of a RunSet (SPEC-text §4.8).
+        spurious_path: True when a multi-hop path passed the value-sensitive
+            entailment gate but is not legitimate support (Supportable claims).
+        spurious_reason: Reason code/text when spurious_path is True (§4.8).
         unresolved_entities: Mention strings that could not be linked to any
             entity in the domain slice.  Distinct from FABRICATED status.
     """
@@ -241,11 +257,13 @@ class ClaimRecord(BaseModel):
     text: str
     status: ClaimStatus
     support_source: SupportSource
+    claim_key: str | None = None
     linked_entities: list[LinkedEntity]
     grounding_path: GroundingPath
     active_perturbations: list[str] = Field(default_factory=list)
     entailment_score: float | None = None
     spurious_path: bool = False
+    spurious_reason: str | None = None
     unresolved_entities: list[str] = Field(default_factory=list)
 
 
@@ -275,6 +293,8 @@ class GroundingRun(BaseModel):
     answer_text: str
     slice: str
     phase: str
+    condition: Condition = Condition.FULL
+    sample_index: int = 0
     claims: list[ClaimRecord]
     active_perturbations: list[str] = Field(default_factory=list)
     grading_reference_id: str | None = None
@@ -300,3 +320,45 @@ class GroundingRun(BaseModel):
             return 0.0
         fabricated = sum(1 for c in self.claims if c.status == ClaimStatus.FABRICATED)
         return fabricated / len(self.claims)
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics aggregated over a RunSet (the N draws x conditions) — SPEC-text §4.8
+# ---------------------------------------------------------------------------
+
+# Pseudo-status used in per-draw / stacked-bar accounting when a canonical claim
+# is not emitted by a given draw (distinct from FABRICATED). Not a ClaimStatus.
+ABSENT = "absent"
+
+
+class ClaimDiagnostics(BaseModel):
+    """One canonical claim, aggregated across the RunSet (SPEC-text §4.8).
+
+    Drives the per-claim Analytics view (#6): the per-condition stacked-bar
+    small-multiple + the stability scalar + the spurious-path warning chip.
+    """
+
+    claim_key: str
+    text: str
+    status: ClaimStatus
+    support_source: SupportSource
+    stability: float  # 1 - H(status|FULL)/log K over the N FULL draws
+    modal_status: ClaimStatus
+    modal_fraction: float  # e.g. 0.9 -> "retrieved 9/10"
+    n_full: int  # number of FULL draws the modal fraction is over
+    # condition -> {status_or_"absent": fraction over N} (stacked-bar input)
+    status_by_condition: dict[str, dict[str, float]]
+    absence_leverage: dict[str, float] = Field(default_factory=dict)
+    fabrication_induction: dict[str, float] = Field(default_factory=dict)
+    spurious_path: bool = False
+    spurious_reason: str | None = None
+
+
+class AnswerDiagnostics(BaseModel):
+    """The full-answer analytics view aggregated over the RunSet (#5)."""
+
+    question: str
+    n_generations: int
+    status_distribution: dict[str, float]  # over the N FULL draws (column chart)
+    fabrication_rate: float  # over the N FULL draws
+    claim_diagnostics: list[ClaimDiagnostics]

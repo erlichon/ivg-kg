@@ -18,6 +18,10 @@ SITELINK_BAND: tuple[int, int] = (BAND_LO, BAND_HI)
 # ---------------------------------------------------------------------------
 K_HOPS: int = 2  # default; tunable 2-3
 
+# Max nodes drawn in the subgraph panel; above this, 1st-degree neighbour
+# expansion of claim nodes is skipped (SPEC-text §4.5, interactions #3/#8).
+SUBGRAPH_NODE_CAP: int = 40
+
 # ---------------------------------------------------------------------------
 # Grounding threshold (SPEC-text §4.3)
 # Entailment score must exceed TAU for a claim to be considered supported.

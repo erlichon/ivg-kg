@@ -1,331 +1,377 @@
-"""Mock fixtures for the IVG-KG Dash skeleton (UI1 / SPEC-text §3.3, §4.5).
+"""Hand-authored MOCK data for the IVG-KG dashboard mockup (offline, deterministic).
 
-Provides a hardcoded, fully deterministic books-slice GroundingRun and the
-corresponding dash-cytoscape subgraph elements.  No randomness, no I/O, no
-third-party imports beyond ivg_kg.schema.
+One coherent scenario — *"When was Frédéric Chopin's father born?"* — authored to
+exercise every status, both Supportable variants, the value-mismatch fabrication,
+and the §4.8 per-claim/answer diagnostics across {full, knowledge-absent,
+content-absent} over N ∈ {5, 10, 20} draws.
 
-Book domain (invented Wikidata-style QIDs):
-  Q_BOOK       = Q11111  "The Hollow Hours"
-  Q_AUTHOR     = Q22222  "Elara Voss"
-  Q_TRADITION  = Q33333  "Symbolist movement"
-  Q_PUBLISHER  = Q44444  "Meridian Press"
+This is MOCK ONLY: no model, no SPARQL, no network. The grounding backend stays a
+stub; these fixtures stand in for what the real precompute would emit.
 
-Support path for the REASONED_SUPPORTABLE claim (2-hop, undirected):
-  Q_BOOK --(P50: author)--> Q_AUTHOR   [traversed_forward=True]
-  Q_TRADITION --(P921: main subject)--> Q_AUTHOR  [traversed_forward=False]
-  (i.e. we walk the P921 edge backwards: Q_AUTHOR <- Q_TRADITION)
-
-Edge-id convention (matches UI2 highlighting contract):
-  "<subject_id>-<property_id>-<object_id>"
-  e.g. "Q11111-P50-Q22222"
+Public surface:
+  mock_grounding_run()        -> the displayed FULL draw #0 (rich claims)
+  mock_subgraph_elements()    -> dash-cytoscape elements (via the real graph_store)
+  mock_grading_reference()    -> the never-ablated reference (KG-full + content labels)
+  build_runset(n)             -> list[GroundingRun] : the N draws x conditions
+  mock_answer_diagnostics(n)  -> AnswerDiagnostics aggregated from build_runset(n)
+  CLAIM_SPANS                 -> {claim_id: substring of answer_text} for inline colouring
+  QUESTION, ANSWER_TEXT, ERROR_RATES, N_CHOICES
 """
-
 from __future__ import annotations
 
+from ivg_kg.data.graph_store import nx_to_cyto_elements
+from ivg_kg.diagnostics import aggregate_runset
 from ivg_kg.schema import (
+    ABSENT,
+    AnswerDiagnostics,
     ClaimRecord,
     ClaimStatus,
+    Condition,
+    ContentLabel,
+    GradingReference,
     GroundingPath,
     GroundingRun,
+    KGEdge,
+    KGNode,
+    KGSnapshot,
     LinkedEntity,
+    Modality,
     PathEdge,
     SupportSource,
+    ValueType,
 )
 
 # ---------------------------------------------------------------------------
-# Stable QID / PID constants (books domain, fully invented)
+# Scenario constants
 # ---------------------------------------------------------------------------
-
-_BOOK_QID = "Q11111"
-_BOOK_LABEL = "The Hollow Hours"
-_BOOK_DESC = "A 1923 novel by Elara Voss, associated with the Symbolist movement."
-
-_AUTHOR_QID = "Q22222"
-_AUTHOR_LABEL = "Elara Voss"
-_AUTHOR_DESC = "German novelist and poet (1891-1956), central figure of Symbolism."
-# Illustrative author-portrait (P18) for the fictional author node, so the
-# skeleton demonstrates entity-image display (SPEC-text §4.5). The image is a
-# demo-visual only — NOT grounding evidence in the books spine. Real public-domain
-# Commons portrait standing in for the invented author.
-_AUTHOR_IMAGE = (
-    "https://commons.wikimedia.org/wiki/Special:FilePath/"
-    "CassandraAusten-JaneAusten(c.1810)_hires.jpg"
+QUESTION = "When was Frédéric Chopin's father born?"
+ANSWER_TEXT = (
+    "Frédéric Chopin's father was Nicolas Chopin, who was born on "
+    "17 June 1771 in Marainville-sur-Madon, France. Chopin is known for his "
+    "Nocturnes."
 )
 
-_TRADITION_QID = "Q33333"
-_TRADITION_LABEL = "Symbolist movement"
-_TRADITION_DESC = "Late 19th/early 20th-century literary and artistic movement."
+# Entities (QIDs are illustrative; this is mock data).
+FCHOPIN = "Q1268"
+NCHOPIN = "Q260763"
+MARAIN = "Q1392501"
+FRANCE = "Q142"
+NOCT = "Q207591"
 
-_PUBLISHER_QID = "Q44444"
-_PUBLISHER_LABEL = "Meridian Press"
-_PUBLISHER_DESC = "German publishing house, founded 1905."
+# The reference-correct date of birth (the grader holds THIS; the answer says 17 June).
+DOB_TRUE = "15 April 1771"
+DOB_FALSE = "17 June 1771"
 
-_P50 = "P50"    # author
-_P50_LABEL = "author"
-_P577 = "P577"  # publication date
-_P577_LABEL = "publication date"
-_P123 = "P123"  # publisher
-_P123_LABEL = "publisher"
-_P921 = "P921"  # main subject
-_P921_LABEL = "main subject"
+# Properties.
+P_FATHER = ("P22", "father")
+P_DOB = ("P569", "date of birth")
+P_POB = ("P19", "place of birth")
+P_COUNTRY = ("P17", "country")
+P_NOTABLE = ("P800", "notable work")
+
+# Per-modality classifier error for the Trust strip (SPEC-text §4.7).
+ERROR_RATES: dict[str, float] = {"text-nli": 0.06, "structure-path": 0.09}
+
+# N-generation choices the Analytics selector offers.
+N_CHOICES: list[int] = [5, 10, 20]
+_MAX_DRAWS = 20
+
+_NODE_LABELS = {
+    FCHOPIN: "Frédéric Chopin",
+    NCHOPIN: "Nicolas Chopin",
+    MARAIN: "Marainville-sur-Madon",
+    FRANCE: "France",
+    NOCT: "Nocturnes",
+}
+_NODE_DESCRIPTIONS = {
+    FCHOPIN: "Polish composer and virtuoso pianist of the Romantic era (1810–1849).",
+    NCHOPIN: "French-born father of Frédéric Chopin; émigré tutor in Poland (1771–1844).",
+    MARAIN: "Commune in the Vosges department, Grand Est, France.",
+    FRANCE: "Country in Western Europe.",
+    NOCT: "Set of solo piano pieces by Frédéric Chopin.",
+}
+
 
 # ---------------------------------------------------------------------------
-# Linked-entity helpers
+# Knowledge graph (snapshot → NetworkX → cytoscape via the real graph_store)
 # ---------------------------------------------------------------------------
-
-
-def _le(qid: str, label: str, desc: str | None = None, score: float = 1.0) -> LinkedEntity:
-    return LinkedEntity(id=qid, label=label, description=desc, link_score=score)
-
-
-# ---------------------------------------------------------------------------
-# Claims
-# ---------------------------------------------------------------------------
-
-
-def _claim_retrieved_direct_triple() -> ClaimRecord:
-    """Claim 1: RETRIEVED / DIRECT_TRIPLE — authorship fact."""
-    return ClaimRecord(
-        claim_id="c1",
-        text="The Hollow Hours was written by Elara Voss.",
-        status=ClaimStatus.RETRIEVED,
-        support_source=SupportSource.DIRECT_TRIPLE,
-        linked_entities=[
-            _le(_BOOK_QID, _BOOK_LABEL, _BOOK_DESC),
-            _le(_AUTHOR_QID, _AUTHOR_LABEL, _AUTHOR_DESC),
-        ],
-        grounding_path=GroundingPath(edges=[], node_ids=[]),
-        entailment_score=0.95,
-    )
-
-
-def _claim_retrieved_text_content() -> ClaimRecord:
-    """Claim 2: RETRIEVED / TEXT_CONTENT — genre/tradition from description.
-
-    No direct triple for tradition membership; the grounding is derived from
-    the entity description text (SPEC-text §3.2 content axis, Invariant #2).
-    """
-    return ClaimRecord(
-        claim_id="c2",
-        text="The Hollow Hours is associated with the Symbolist literary tradition.",
-        status=ClaimStatus.RETRIEVED,
-        support_source=SupportSource.TEXT_CONTENT,
-        linked_entities=[
-            _le(_BOOK_QID, _BOOK_LABEL, _BOOK_DESC),
-            _le(_TRADITION_QID, _TRADITION_LABEL, _TRADITION_DESC, score=0.88),
-        ],
-        grounding_path=GroundingPath(edges=[], node_ids=[]),
-        entailment_score=0.91,
-    )
-
-
-def _claim_reasoned_supportable_multi_hop() -> ClaimRecord:
-    """Claim 3: REASONED_SUPPORTABLE / MULTI_HOP_PATH.
-
-    Path: Q_BOOK --(P50)--> Q_AUTHOR <--(P921)-- Q_TRADITION
-    Hop 1 is forward (stored direction); hop 2 is backward (traversed_forward=False).
-    """
-    hop1 = PathEdge(
-        subject_id=_BOOK_QID,
-        subject_label=_BOOK_LABEL,
-        property_id=_P50,
-        property_label=_P50_LABEL,
-        object_id=_AUTHOR_QID,
-        object_label=_AUTHOR_LABEL,
-        traversed_forward=True,
-    )
-    # The stored edge is Q_TRADITION -P921-> Q_AUTHOR.
-    # We traverse it backward (from Q_AUTHOR side) to reach Q_TRADITION.
-    # subject_id/object_id record the STORED direction; traversed_forward=False
-    # signals that the path walked this edge against its stored direction.
-    hop2 = PathEdge(
-        subject_id=_TRADITION_QID,
-        subject_label=_TRADITION_LABEL,
-        property_id=_P921,
-        property_label=_P921_LABEL,
-        object_id=_AUTHOR_QID,
-        object_label=_AUTHOR_LABEL,
-        traversed_forward=False,
-    )
-    path = GroundingPath(
-        edges=[hop1, hop2],
-        node_ids=[_BOOK_QID, _AUTHOR_QID, _TRADITION_QID],
-    )
-    return ClaimRecord(
-        claim_id="c3",
-        text=(
-            "The Hollow Hours belongs to the Symbolist movement, "
-            "inferred via its author Elara Voss."
+def chopin_snapshot() -> KGSnapshot:
+    """The KG-full books snapshot for the Chopin scenario (fresh each call)."""
+    nodes = [
+        KGNode(id=qid, label=label, description=_NODE_DESCRIPTIONS.get(qid))
+        for qid, label in _NODE_LABELS.items()
+    ]
+    edges = [
+        KGEdge(
+            subject_id=FCHOPIN, property_id=P_FATHER[0], property_label=P_FATHER[1],
+            object_id=NCHOPIN, object_label="Nicolas Chopin", value_type=ValueType.ITEM,
         ),
-        status=ClaimStatus.REASONED_SUPPORTABLE,
-        support_source=SupportSource.MULTI_HOP_PATH,
-        linked_entities=[
-            _le(_BOOK_QID, _BOOK_LABEL, _BOOK_DESC),
-            _le(_TRADITION_QID, _TRADITION_LABEL, _TRADITION_DESC, score=0.82),
-            _le(_AUTHOR_QID, _AUTHOR_LABEL, _AUTHOR_DESC),
-        ],
-        grounding_path=path,
-        entailment_score=0.70,
-    )
-
-
-def _claim_fabricated_none() -> ClaimRecord:
-    """Claim 4: FABRICATED / NONE — invented award, no supporting evidence."""
-    return ClaimRecord(
-        claim_id="c4",
-        text="The Hollow Hours won the International Fiction Prize in 1925.",
-        status=ClaimStatus.FABRICATED,
-        support_source=SupportSource.NONE,
-        linked_entities=[
-            _le(_BOOK_QID, _BOOK_LABEL, _BOOK_DESC),
-        ],
-        grounding_path=GroundingPath(edges=[], node_ids=[]),
-        entailment_score=None,
-    )
-
-
-def _claim_fabricated_spurious() -> ClaimRecord:
-    """Claim 5: FABRICATED with spurious_path=True.
-
-    A candidate multi-hop path was found (Book->Author->Publisher) but the
-    entailment gate rejected it.  Illustrates the 'evidence existed but failed'
-    case (SPEC spurious_path flag).
-    """
-    # Candidate path that was found but rejected
-    hop1 = PathEdge(
-        subject_id=_BOOK_QID,
-        subject_label=_BOOK_LABEL,
-        property_id=_P50,
-        property_label=_P50_LABEL,
-        object_id=_AUTHOR_QID,
-        object_label=_AUTHOR_LABEL,
-        traversed_forward=True,
-    )
-    hop2 = PathEdge(
-        subject_id=_AUTHOR_QID,
-        subject_label=_AUTHOR_LABEL,
-        property_id=_P123,
-        property_label=_P123_LABEL,
-        object_id=_PUBLISHER_QID,
-        object_label=_PUBLISHER_LABEL,
-        traversed_forward=True,
-    )
-    spurious_path = GroundingPath(
-        edges=[hop1, hop2],
-        node_ids=[_BOOK_QID, _AUTHOR_QID, _PUBLISHER_QID],
-    )
-    return ClaimRecord(
-        claim_id="c5",
-        text="Elara Voss was exclusively published by Meridian Press throughout her career.",
-        status=ClaimStatus.FABRICATED,
-        support_source=SupportSource.MULTI_HOP_PATH,
-        linked_entities=[
-            _le(_AUTHOR_QID, _AUTHOR_LABEL, _AUTHOR_DESC),
-            _le(_PUBLISHER_QID, _PUBLISHER_LABEL, _PUBLISHER_DESC, score=0.79),
-        ],
-        grounding_path=spurious_path,
-        entailment_score=0.31,
-        spurious_path=True,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
-def mock_grounding_run() -> GroundingRun:
-    """Return a fresh hardcoded GroundingRun for the books slice.
-
-    Constructs a new object on every call — no shared mutable state.
-    Covers all three ClaimStatus values, both DIRECT_TRIPLE and TEXT_CONTENT
-    retrieved sources, and a MULTI_HOP_PATH with an undirected traversal.
-    """
-    return GroundingRun(
-        run_id="mock-run-books-001",
-        question="Tell me about the novel 'The Hollow Hours' and its literary context.",
-        answer_text=(
-            "The Hollow Hours was written by Elara Voss. "
-            "The Hollow Hours is associated with the Symbolist literary tradition. "
-            "The Hollow Hours belongs to the Symbolist movement, "
-            "inferred via its author Elara Voss. "
-            "The Hollow Hours won the International Fiction Prize in 1925. "
-            "Elara Voss was exclusively published by Meridian Press throughout her career."
+        KGEdge(
+            subject_id=NCHOPIN, property_id=P_DOB[0], property_label=P_DOB[1],
+            object_id=None, object_label=DOB_TRUE, value_type=ValueType.TIME,
         ),
-        slice="books",
-        phase="A",
-        claims=[
-            _claim_retrieved_direct_triple(),
-            _claim_retrieved_text_content(),
-            _claim_reasoned_supportable_multi_hop(),
-            _claim_fabricated_none(),
-            _claim_fabricated_spurious(),
-        ],
-        active_perturbations=[],
+        KGEdge(
+            subject_id=NCHOPIN, property_id=P_POB[0], property_label=P_POB[1],
+            object_id=MARAIN, object_label="Marainville-sur-Madon", value_type=ValueType.ITEM,
+        ),
+        KGEdge(
+            subject_id=MARAIN, property_id=P_COUNTRY[0], property_label=P_COUNTRY[1],
+            object_id=FRANCE, object_label="France", value_type=ValueType.ITEM,
+        ),
+        KGEdge(
+            subject_id=FCHOPIN, property_id=P_NOTABLE[0], property_label=P_NOTABLE[1],
+            object_id=NOCT, object_label="Nocturnes", value_type=ValueType.ITEM,
+        ),
+    ]
+    return KGSnapshot(
+        snapshot_id="chopin-mock-v1", slice="books", domain_qid=FCHOPIN,
+        nodes=nodes, edges=edges, meta={"scenario": "chopin-father-dob"},
     )
 
 
 def mock_subgraph_elements() -> list[dict]:
-    """Return dash-cytoscape elements for the books mock subgraph.
+    """dash-cytoscape elements for the Chopin subgraph (literal date node included)."""
+    return nx_to_cyto_elements(chopin_snapshot())
 
-    Includes a node per entity and edges for all triples referenced by the
-    mock run.  Edge ids use the stable convention '<subject_id>-<pid>-<object_id>'
-    so that UI2 callbacks can map a claim's GroundingPath to specific elements
-    for stylesheet-based highlighting without mutating the global stylesheet.
 
-    The author node carries an ``image_path`` (a P18 author portrait) so the
-    skeleton demonstrates the entity-detail image display (SPEC-text §4.5). The
-    image is a demo-visual only — books remain a TEXT-vs-knowledge slice and no
-    claim grades against an image (no IMAGE_CONTENT support; books-first gate).
+def mock_grading_reference() -> GradingReference:
+    """The never-ablated grading reference (KG-full + a content-only label)."""
+    return GradingReference(
+        snapshot=chopin_snapshot(),
+        content_labels=[
+            ContentLabel(
+                entity_id=NCHOPIN, modality=Modality.TEXT,
+                fact="Nicolas Chopin was a French émigré who settled in Poland.",
+                source="description",
+            )
+        ],
+    )
+
+
+def _ent(qid: str) -> LinkedEntity:
+    return LinkedEntity(id=qid, label=_NODE_LABELS[qid], description=_NODE_DESCRIPTIONS.get(qid))
+
+
+def _pe(subj: str, prop: tuple[str, str], obj: str, obj_label: str) -> PathEdge:
+    return PathEdge(
+        subject_id=subj, subject_label=_NODE_LABELS[subj],
+        property_id=prop[0], property_label=prop[1],
+        object_id=obj, object_label=obj_label, traversed_forward=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Canonical claims (the displayed FULL draw #0) — rich, with paths + diagnostics
+# ---------------------------------------------------------------------------
+def canonical_claims() -> list[ClaimRecord]:
+    """The six canonical claims (fresh objects each call)."""
+    empty_path = GroundingPath(edges=[], node_ids=[])
+    return [
+        # c1 — RETRIEVED via direct triple P22 (father).
+        ClaimRecord(
+            claim_id="c1",
+            text="Frédéric Chopin's father was Nicolas Chopin",
+            status=ClaimStatus.RETRIEVED, support_source=SupportSource.DIRECT_TRIPLE,
+            claim_key=f"{FCHOPIN}|P22|{NCHOPIN}",
+            linked_entities=[_ent(FCHOPIN), _ent(NCHOPIN)],
+            grounding_path=empty_path, entailment_score=0.97,
+        ),
+        # c2 — RETRIEVED via direct triple P19 (place of birth).
+        ClaimRecord(
+            claim_id="c2",
+            text="Nicolas Chopin was born in Marainville-sur-Madon",
+            status=ClaimStatus.RETRIEVED, support_source=SupportSource.DIRECT_TRIPLE,
+            claim_key=f"{NCHOPIN}|P19|{MARAIN}",
+            linked_entities=[_ent(NCHOPIN), _ent(MARAIN)],
+            grounding_path=empty_path, entailment_score=0.95,
+        ),
+        # c3 — FABRICATED: value mismatch (reference holds 15 April 1771).
+        ClaimRecord(
+            claim_id="c3",
+            text="Nicolas Chopin was born on 17 June 1771",
+            status=ClaimStatus.FABRICATED, support_source=SupportSource.NONE,
+            claim_key=f"{NCHOPIN}|P569|1771-06-17",
+            linked_entities=[_ent(NCHOPIN)],
+            grounding_path=empty_path, entailment_score=0.18,
+            spurious_path=False,
+        ),
+        # c4 — SUPPORTABLE, GENUINE path: father born in France (P19 → P17).
+        ClaimRecord(
+            claim_id="c4",
+            text="Chopin's father was born in France",
+            status=ClaimStatus.REASONED_SUPPORTABLE, support_source=SupportSource.MULTI_HOP_PATH,
+            claim_key=f"{NCHOPIN}|P19+P17|{FRANCE}",
+            linked_entities=[_ent(NCHOPIN), _ent(FRANCE)],
+            grounding_path=GroundingPath(
+                edges=[
+                    _pe(NCHOPIN, P_POB, MARAIN, "Marainville-sur-Madon"),
+                    _pe(MARAIN, P_COUNTRY, FRANCE, "France"),
+                ],
+                node_ids=[NCHOPIN, MARAIN, FRANCE],
+            ),
+            entailment_score=0.86, spurious_path=False,
+        ),
+        # c5 — SUPPORTABLE but FLAGGED spurious: path reaches France via the FATHER's
+        # birthplace, not Chopin's own (relation/value illegitimacy).
+        ClaimRecord(
+            claim_id="c5",
+            text="Frédéric Chopin was born in France",
+            status=ClaimStatus.REASONED_SUPPORTABLE, support_source=SupportSource.MULTI_HOP_PATH,
+            claim_key=f"{FCHOPIN}|P19|{FRANCE}",
+            linked_entities=[_ent(FCHOPIN), _ent(FRANCE)],
+            grounding_path=GroundingPath(
+                edges=[
+                    _pe(FCHOPIN, P_FATHER, NCHOPIN, "Nicolas Chopin"),
+                    _pe(NCHOPIN, P_POB, MARAIN, "Marainville-sur-Madon"),
+                    _pe(MARAIN, P_COUNTRY, FRANCE, "France"),
+                ],
+                node_ids=[FCHOPIN, NCHOPIN, MARAIN, FRANCE],
+            ),
+            entailment_score=0.71,
+            spurious_path=True,
+            spurious_reason=(
+                "relation/value illegitimacy: the path reaches France via the "
+                "father's place of birth (P22→P19→P17), not the subject's own "
+                "birthplace (P19) — Chopin was born in Żelazowa Wola, Poland."
+            ),
+        ),
+        # c6 — RETRIEVED via direct triple P800 (notable work).
+        ClaimRecord(
+            claim_id="c6",
+            text="Chopin is known for his Nocturnes",
+            status=ClaimStatus.RETRIEVED, support_source=SupportSource.DIRECT_TRIPLE,
+            claim_key=f"{FCHOPIN}|P800|{NOCT}",
+            linked_entities=[_ent(FCHOPIN), _ent(NOCT)],
+            grounding_path=empty_path, entailment_score=0.93,
+        ),
+    ]
+
+
+# Inline answer-text spans (substrings) per claim, for status-coloured highlighting.
+# c5 is inferential (no contiguous span) → claim list only.
+CLAIM_SPANS: dict[str, str] = {
+    "c1": "Frédéric Chopin's father was Nicolas Chopin",
+    "c3": "born on 17 June 1771",
+    "c2": "Marainville-sur-Madon",
+    "c4": "France",
+    "c6": "Chopin is known for his Nocturnes",
+}
+
+
+# ---------------------------------------------------------------------------
+# Per-claim per-condition draw distributions (counts over _MAX_DRAWS draws).
+# Story: structural RETRIEVED claims collapse under knowledge-absence but survive
+# content-absence; the fabricated date worsens under knowledge-absence; the genuine
+# path drops when its structure is withheld; the spurious path is unstable.
+# ---------------------------------------------------------------------------
+R = ClaimStatus.RETRIEVED.value
+S = ClaimStatus.REASONED_SUPPORTABLE.value
+F = ClaimStatus.FABRICATED.value
+A = ABSENT
+
+_DRAW_COUNTS: dict[str, dict[str, dict[str, int]]] = {
+    "c1": {  # retrieved father (structural)
+        Condition.FULL.value: {R: 19, S: 1},
+        Condition.KNOWLEDGE_ABSENT.value: {R: 3, F: 12, A: 5},
+        Condition.CONTENT_ABSENT.value: {R: 18, S: 2},
+    },
+    "c2": {  # retrieved place of birth (structural)
+        Condition.FULL.value: {R: 18, S: 2},
+        Condition.KNOWLEDGE_ABSENT.value: {R: 4, F: 10, A: 6},
+        Condition.CONTENT_ABSENT.value: {R: 17, S: 3},
+    },
+    "c3": {  # fabricated date (value mismatch)
+        Condition.FULL.value: {F: 16, A: 4},
+        Condition.KNOWLEDGE_ABSENT.value: {F: 20},
+        Condition.CONTENT_ABSENT.value: {F: 15, A: 5},
+    },
+    "c4": {  # supportable genuine path (father → France)
+        Condition.FULL.value: {S: 16, A: 4},
+        Condition.KNOWLEDGE_ABSENT.value: {S: 4, F: 8, A: 8},
+        Condition.CONTENT_ABSENT.value: {S: 15, A: 5},
+    },
+    "c5": {  # supportable spurious path (Chopin → France via father)
+        Condition.FULL.value: {S: 12, F: 8},
+        Condition.KNOWLEDGE_ABSENT.value: {S: 2, F: 14, A: 4},
+        Condition.CONTENT_ABSENT.value: {S: 11, F: 9},
+    },
+    "c6": {  # retrieved notable work (structural)
+        Condition.FULL.value: {R: 18, S: 2},
+        Condition.KNOWLEDGE_ABSENT.value: {R: 3, F: 11, A: 6},
+        Condition.CONTENT_ABSENT.value: {R: 18, S: 2},
+    },
+}
+
+_SPREAD_ORDER = [R, S, F, A]  # tie-break priority for deterministic interleave
+
+
+def _spread(counts: dict[str, int]) -> list[str]:
+    """Deterministically spread `counts` into a length-sum(counts) sequence.
+
+    Lowest placed/target ratio wins each slot (ties by _SPREAD_ORDER), so a
+    minority status is distributed across the sequence — making N-prefixes of
+    5/10/20 give meaningfully different fractions (the N-selector does something).
+    The highest-priority present status lands at index 0 (= the canonical
+    FULL draw-#0 status).
     """
-    nodes: list[dict] = [
-        {"data": {"id": _BOOK_QID, "label": _BOOK_LABEL, "description": _BOOK_DESC}},
-        {
-            "data": {
-                "id": _AUTHOR_QID,
-                "label": _AUTHOR_LABEL,
-                "description": _AUTHOR_DESC,
-                "image_path": _AUTHOR_IMAGE,
-            }
-        },
-        {
-            "data": {
-                "id": _TRADITION_QID,
-                "label": _TRADITION_LABEL,
-                "description": _TRADITION_DESC,
-            }
-        },
-        {
-            "data": {
-                "id": _PUBLISHER_QID,
-                "label": _PUBLISHER_LABEL,
-                "description": _PUBLISHER_DESC,
-            }
-        },
+    placed = dict.fromkeys(counts, 0)
+    seq: list[str] = []
+    for _ in range(sum(counts.values())):
+        best = min(
+            counts,
+            key=lambda k: (placed[k] / counts[k], _SPREAD_ORDER.index(k)),
+        )
+        seq.append(best)
+        placed[best] += 1
+    return seq
+
+
+def _draw_vectors(condition: str) -> dict[str, list[str]]:
+    return {cid: _spread(_DRAW_COUNTS[cid][condition]) for cid in _DRAW_COUNTS}
+
+
+def mock_grounding_run() -> GroundingRun:
+    """The displayed run: FULL condition, draw #0, the rich canonical claims."""
+    return GroundingRun(
+        run_id="chopin-full-0", question=QUESTION, answer_text=ANSWER_TEXT,
+        slice="books", phase="A", condition=Condition.FULL, sample_index=0,
+        claims=canonical_claims(), grading_reference_id="chopin-mock-v1",
+        error_rates=dict(ERROR_RATES),
+    )
+
+
+def build_runset(n: int = _MAX_DRAWS) -> list[GroundingRun]:
+    """Materialize the RunSet: n draws under each of {full, knowledge-, content-absent}.
+
+    Draw j clones the canonical claims, overriding each claim's status with its
+    j-th drawn status under that condition; a drawn status of ABSENT omits the
+    claim from that draw. Deterministic; n is clamped to [1, 20].
+    """
+    n = max(1, min(n, _MAX_DRAWS))
+    conditions = [
+        Condition.FULL, Condition.KNOWLEDGE_ABSENT, Condition.CONTENT_ABSENT,
     ]
+    runs: list[GroundingRun] = []
+    for cond in conditions:
+        vectors = _draw_vectors(cond.value)
+        for j in range(n):
+            draw_claims: list[ClaimRecord] = []
+            for canonical in canonical_claims():
+                drawn = vectors[canonical.claim_id][j]
+                if drawn == ABSENT:
+                    continue
+                draw_claims.append(canonical.model_copy(update={"status": ClaimStatus(drawn)}))
+            runs.append(
+                GroundingRun(
+                    run_id=f"chopin-{cond.value}-{j}", question=QUESTION,
+                    answer_text=ANSWER_TEXT, slice="books", phase="A",
+                    condition=cond, sample_index=j, claims=draw_claims,
+                    grading_reference_id="chopin-mock-v1", error_rates=dict(ERROR_RATES),
+                )
+            )
+    return runs
 
-    def _edge(subj: str, pid: str, obj: str, label: str) -> dict:
-        return {
-            "data": {
-                "id": f"{subj}-{pid}-{obj}",
-                "source": subj,
-                "target": obj,
-                "label": label,
-                "property_id": pid,
-            }
-        }
 
-    edges: list[dict] = [
-        # Claim 1: DIRECT_TRIPLE — book authored by
-        _edge(_BOOK_QID, _P50, _AUTHOR_QID, _P50_LABEL),
-        # Multi-hop path edges (also used by claim 3 and spurious claim 5)
-        _edge(_TRADITION_QID, _P921, _AUTHOR_QID, _P921_LABEL),
-        _edge(_AUTHOR_QID, _P123, _PUBLISHER_QID, _P123_LABEL),
-        # Book publication date (structural triple, adds subgraph richness)
-        # object_id is None for date values — use a placeholder node-less edge
-        # represented as a string target; we instead encode it as a data attr
-        # to avoid referential-integrity issues (no date node in the graph).
-        # Omitted here to keep the elements set clean and self-consistent.
-    ]
-
-    return nodes + edges
+def mock_answer_diagnostics(n: int = _MAX_DRAWS) -> AnswerDiagnostics:
+    """Aggregate the n-draw RunSet into AnswerDiagnostics (§4.8)."""
+    return aggregate_runset(build_runset(n))
