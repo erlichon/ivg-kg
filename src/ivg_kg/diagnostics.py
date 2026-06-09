@@ -190,22 +190,35 @@ def aggregate_runset(runs: list[GroundingRun]) -> AnswerDiagnostics:
             )
         )
 
-    # Answer-level distribution over the N FULL draws, pooled over emitted
-    # (non-absent) claim observations — the three-grade column chart (#5).
-    pooled: list[str] = []
+    # Answer-level distribution as the MEAN +/- STD of the per-draw status
+    # fraction over the N FULL draws — the three-grade column chart with error
+    # bars (#5). Per draw, fraction = (#claims of status) / (#emitted claims).
+    per_draw: dict[str, list[float]] = {s: [] for s in _STATUS_PRIORITY}
     for draw in full_draws:
-        pooled.extend(c.status.value for c in draw.claims)
-    total = len(pooled)
-    dist: dict[str, float] = dict.fromkeys(_STATUS_PRIORITY, 0.0)
-    if total:
-        for s in pooled:
-            dist[s] = dist.get(s, 0.0) + 1.0 / total
-    fab_rate = dist.get(ClaimStatus.FABRICATED.value, 0.0)
+        statuses = [c.status.value for c in draw.claims]
+        emitted = len(statuses) or 1
+        for s in _STATUS_PRIORITY:
+            per_draw[s].append(statuses.count(s) / emitted)
+
+    def _mean(xs: list[float]) -> float:
+        return sum(xs) / len(xs) if xs else 0.0
+
+    def _std(xs: list[float]) -> float:
+        if not xs:
+            return 0.0
+        m = _mean(xs)
+        return math.sqrt(sum((x - m) ** 2 for x in xs) / len(xs))  # population std
+
+    dist = {s: round(_mean(per_draw[s]), 4) for s in _STATUS_PRIORITY}
+    dist_std = {s: round(_std(per_draw[s]), 4) for s in _STATUS_PRIORITY}
+    fab = ClaimStatus.FABRICATED.value
 
     return AnswerDiagnostics(
         question=question,
         n_generations=n_full,
-        status_distribution={s: round(v, 4) for s, v in dist.items()},
-        fabrication_rate=round(fab_rate, 4),
+        status_distribution=dist,
+        status_distribution_std=dist_std,
+        fabrication_rate=dist[fab],
+        fabrication_rate_std=dist_std[fab],
         claim_diagnostics=claim_diags,
     )

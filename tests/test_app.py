@@ -161,3 +161,21 @@ def test_ui_uses_supportable_not_reasoned():
     # The long enum value may appear in code/option values, but never as a bare
     # "reasoned" UI label (constraint #4): strip the enum value, then assert.
     assert "reasoned" not in rendered.replace("reasoned-supportable", "")
+
+
+def test_layout_has_slice_and_settings_controls():
+    s = str(get_layout())
+    assert "slice-selector" in s and "settings-toggle" in s and "settings-panel" in s
+
+
+def test_settings_toggle_callback_registered():
+    app = make_app()
+    assert sum(1 for k in app.callback_map if "settings-panel.style" in k) == 1
+
+
+def test_status_distribution_figure_with_std():
+    d = fx.mock_answer_diagnostics(20)
+    fig = make_status_distribution_figure(
+        d.status_distribution, d.n_generations, d.status_distribution_std
+    )
+    assert isinstance(fig, go.Figure)

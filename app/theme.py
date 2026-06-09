@@ -12,6 +12,8 @@ Terminal / monospace aesthetic on a dark ground.
 """
 from __future__ import annotations
 
+from dash import html
+
 from ivg_kg.schema import ClaimStatus
 
 # --- ground / chrome ---------------------------------------------------------
@@ -68,6 +70,25 @@ def status_color(status: str) -> str:
 def status_label(status: str) -> str:
     """Short UI label for a claim status value."""
     return STATUS_UI_LABELS.get(str(status), str(status))
+
+
+def info_icon(explanation: str) -> html.Span:
+    """A small 'ⓘ' indicator with a native hover tooltip (what + how computed).
+
+    Lightweight + offline: the explanation rides on the title attribute, so it
+    shows on hover with no extra dependency.
+    """
+    return html.Span(
+        "ⓘ",
+        title=explanation,
+        style={
+            "color": ACCENT,
+            "cursor": "help",
+            "fontSize": "0.78em",
+            "marginLeft": "5px",
+            "opacity": 0.8,
+        },
+    )
 
 
 def panel_style(**extra: object) -> dict:

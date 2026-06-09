@@ -119,7 +119,9 @@ def register_callbacks(
         diag = diagnostics_by_n.get(int(n)) if n is not None else None
         if diag is None:
             raise PreventUpdate
-        fig = make_status_distribution_figure(diag.status_distribution, diag.n_generations)
+        fig = make_status_distribution_figure(
+            diag.status_distribution, diag.n_generations, diag.status_distribution_std
+        )
         return fig, fab_rate_readout(diag)
 
     # ---- F: node tap / reset -> zoom elements + entity-detail (#7/#8) -------
@@ -141,3 +143,15 @@ def register_callbacks(
             ego_elements(overview_elements, node_data["id"]),
             node_detail_content(node_data),
         )
+
+    # ---- G: ⚙ toggle the generation-settings panel (#6) ---------------------
+    @app.callback(
+        Output("settings-panel", "style"),
+        Input("settings-toggle", "n_clicks"),
+        State("settings-panel", "style"),
+        prevent_initial_call=True,
+    )
+    def toggle_settings(n, style):  # noqa: ANN001
+        style = dict(style or {})
+        style["display"] = "block" if (n or 0) % 2 == 1 else "none"
+        return style

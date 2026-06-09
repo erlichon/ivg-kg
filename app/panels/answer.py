@@ -129,53 +129,6 @@ def _answer_with_spans(run: GroundingRun) -> html.Div:
     )
 
 
-def _verify_trace(run: GroundingRun) -> html.Div:
-    """Terminal-style Process-pillar trace: >>PROPOSED → >>VERIFY → status ✓/✗."""
-    lines: list = []
-    for c in run.claims:
-        grounded = c.status != ClaimStatus.FABRICATED
-        mark = "✓" if grounded else "✗"
-        color = theme.status_color(c.status.value)
-        short = c.text if len(c.text) <= 46 else c.text[:43] + "…"
-        lines.append(
-            html.Div(
-                [
-                    html.Span(">>PROPOSED ", style={"color": theme.FAINT}),
-                    html.Span(short, style={"color": theme.MUTED}),
-                ],
-                style={"whiteSpace": "nowrap", "overflow": "hidden", "textOverflow": "ellipsis"},
-            )
-        )
-        lines.append(
-            html.Div(
-                [
-                    html.Span("   >>VERIFY → ", style={"color": theme.FAINT}),
-                    html.Span(
-                        f"{theme.status_label(c.status.value).upper()} {mark}",
-                        style={"color": color, "fontWeight": "bold"},
-                    ),
-                ],
-                style={"marginBottom": "4px"},
-            )
-        )
-    return html.Div(
-        [
-            html.Div(
-                "process · verification trace",
-                style={"color": theme.FAINT, "fontSize": "0.7em", "marginBottom": "6px"},
-            ),
-            html.Div(lines, style={"fontSize": "0.74em", "lineHeight": "1.35"}),
-        ],
-        style={
-            "background": theme.PANEL_ALT,
-            "border": f"1px solid {theme.BORDER}",
-            "borderRadius": "6px",
-            "padding": "8px 10px",
-            "marginBottom": "14px",
-        },
-    )
-
-
 def _status_filter() -> html.Div:
     return html.Div(
         [
@@ -221,7 +174,15 @@ def render_claim_list(
             continue
         color = theme.status_color(c.status.value)
         is_sel = c.claim_id in badge_for
-        children = [_status_chip(c.status.value), html.Span(c.text)]
+        grounded = c.status != ClaimStatus.FABRICATED
+        # Process pillar, merged into the row: proposed → verified ✓/✗.
+        verify_mark = html.Span(
+            "✓" if grounded else "✗",
+            title="proposed → verified against the grading reference",
+            style={"color": theme.TEXT if grounded else color, "fontWeight": "bold",
+                   "marginRight": "6px", "fontFamily": theme.MONO},
+        )
+        children = [verify_mark, _status_chip(c.status.value), html.Span(c.text)]
         if is_sel:
             children.insert(
                 0,
@@ -288,8 +249,15 @@ def get_answer_panel(run: GroundingRun) -> html.Div:
                                       "letterSpacing": "0.1em", "marginBottom": "10px"}),
             _question_bubble(run.question),
             _answer_with_spans(run),
-            _verify_trace(run),
             _status_filter(),
+            html.Div(
+                [
+                    ">> claims · proposed → verified against the grading reference ",
+                    html.Span("(✓ grounded · ✗ fabricated)", style={"color": theme.FAINT}),
+                ],
+                style={"color": theme.MUTED, "fontSize": "0.72em", "marginBottom": "6px",
+                       "fontFamily": theme.MONO},
+            ),
             html.Div(
                 render_claim_list(run, [], list(_GRADE_ORDER)),
                 id="claim-list",

@@ -55,16 +55,33 @@ per-modality classifier-error strip in Analytics.
    the overview: all claim nodes + their 1st-degree neighbours, including the distinctly
    styled **literal** node (the date of birth). → `screenshots/01-overview.png`
 
-Plus: the **Process** verification trace (Answer column) and the persistent **Trust**
-strip rendering `error_rates` (text-NLI 6%, structure-path 9%).
+Plus: the **Process** pillar is merged into the claim list (each claim shows
+`✓/✗ proposed → verified`, no separate trace block); and the persistent **Trust**
+strip renders `error_rates` (text-NLI 6%, structure-path 9%).
+
+## Header controls
+- **Slice selector** (top-left): switch data slices. Mock — the one books scenario
+  (Chopin) is selected; the gated `taxa` / `artwork` image slices are shown disabled
+  (built post-M-BOOKS).
+- **⚙ generation** (top-right): toggles a **generation-settings** panel — temperature,
+  top-p, max-new-tokens, model — for the live N-generation path. Presentational in the
+  mock; the on-stage figures run off precomputed offline run-sets (§4.6/§10).
+
+## Reading aids
+- **Mean ± std error bars** on the claim-status distribution: bars are the mean per-draw
+  fraction over the N generations, whiskers are ±1 std across those draws.
+- **ⓘ info indicators** next to every score (fabrication rate, distribution, stability,
+  absence-leverage, fabrication-induction, the spurious chip, the Trust strip) — hover for
+  what it means and how it's computed.
 
 ## Screenshots
 | file | shows |
 | --- | --- |
-| `screenshots/01-overview.png` | Overview state (#8), full-answer analytics (#5), Trust strip |
-| `screenshots/02-fabricated-claim-perclaim.png` | Fabricated claim selected → per-claim stacked bar (#4/#6) |
-| `screenshots/03-multiselect-brush.png` | Four claims multi-selected, brushed onto the subgraph with badges (#2) |
+| `screenshots/01-overview.png` | Overview (#8), merged answer column, full-answer analytics with error bars + ⓘ (#5), header controls, Trust strip |
+| `screenshots/02-fabricated-claim-perclaim.png` | Fabricated claim selected → per-claim stacked bar + leverage readouts (#4/#6) |
+| `screenshots/03-multiselect-brush.png` | Three claims multi-selected, brushed onto the subgraph with badges + readable edge labels (#2) |
 | `screenshots/04-node-zoom-detail.png` | Node tapped → zoom + entity-detail pane (#7) |
+| `screenshots/06-generation-settings.png` | ⚙ generation-settings panel open (mock LLM params) |
 
 ## Authored design details (where the spec left them open)
 - **Node cap:** `SUBGRAPH_NODE_CAP = 40` (`src/ivg_kg/config.py`).

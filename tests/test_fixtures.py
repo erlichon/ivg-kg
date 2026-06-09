@@ -96,3 +96,10 @@ def test_n_selector_changes_distribution():
 def test_aggregate_direct_runset_matches_helper():
     runs = fx.build_runset(10)
     assert aggregate_runset(runs).model_dump() == fx.mock_answer_diagnostics(10).model_dump()
+
+
+def test_distribution_has_mean_and_std():
+    d = fx.mock_answer_diagnostics(20)
+    assert set(d.status_distribution_std) == set(d.status_distribution)
+    assert all(v >= 0 for v in d.status_distribution_std.values())
+    assert d.fabrication_rate_std >= 0.0

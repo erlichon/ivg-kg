@@ -359,6 +359,10 @@ class AnswerDiagnostics(BaseModel):
 
     question: str
     n_generations: int
-    status_distribution: dict[str, float]  # over the N FULL draws (column chart)
-    fabrication_rate: float  # over the N FULL draws
+    # mean per-draw fraction over the N FULL draws (column chart heights)
+    status_distribution: dict[str, float]
+    # population std of the per-draw fraction over the N FULL draws (error bars)
+    status_distribution_std: dict[str, float] = Field(default_factory=dict)
+    fabrication_rate: float  # mean per-draw fabricated fraction over the N FULL draws
+    fabrication_rate_std: float = 0.0
     claim_diagnostics: list[ClaimDiagnostics]

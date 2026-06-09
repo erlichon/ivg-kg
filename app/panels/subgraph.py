@@ -63,9 +63,16 @@ BASE_STYLESHEET: list[dict] = [
             "target-arrow-color": theme.FAINT,
             "line-color": theme.FAINT,
             "font-family": theme.MONO,
-            "font-size": "8px",
-            "color": theme.MUTED,
+            "font-size": "9px",
+            # bright label on its own dark pill, so it stays readable over the
+            # line (and over a status-hued highlight) — never tinted by the edge.
+            "color": "#e6edf3",
+            "text-background-color": theme.BG,
+            "text-background-opacity": 0.9,
+            "text-background-padding": "2px",
+            "text-background-shape": "round-rectangle",
             "text-rotation": "autorotate",
+            "text-margin-y": -1,
             "width": 1.5,
         },
     },
