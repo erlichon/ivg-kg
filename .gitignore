@@ -223,3 +223,7 @@ data/runs/
 
 # Tool caches
 .ruff_cache/
+
+# go-task fingerprint cache + Taskfile runtime dir (app PID/logs)
+.task/
+.run/
