@@ -72,22 +72,33 @@ def status_label(status: str) -> str:
     return STATUS_UI_LABELS.get(str(status), str(status))
 
 
-def info_icon(explanation: str) -> html.Span:
-    """A small 'ⓘ' indicator with a native hover tooltip (what + how computed).
+def info_icon(explanation: str) -> html.Details:
+    """A click-to-toggle 'ⓘ' indicator (what + how computed).
 
-    Lightweight + offline: the explanation rides on the title attribute, so it
-    shows on hover with no extra dependency.
+    Uses a native <details>/<summary> disclosure: click the ⓘ to reveal a
+    persistent, fully-wrapping note (it stays until clicked again — no flaky
+    hover). Offline, no callback. The summary marker is hidden via info.css.
     """
-    return html.Span(
-        "ⓘ",
-        title=explanation,
-        style={
-            "color": ACCENT,
-            "cursor": "help",
-            "fontSize": "0.78em",
-            "marginLeft": "5px",
-            "opacity": 0.8,
-        },
+    return html.Details(
+        [
+            html.Summary(
+                "ⓘ",
+                style={"color": ACCENT, "cursor": "pointer", "fontSize": "0.85em",
+                       "display": "inline"},
+            ),
+            html.Div(
+                explanation,
+                style={
+                    "marginTop": "4px", "maxWidth": "300px", "whiteSpace": "normal",
+                    "background": "#0b1020", "border": f"1px solid {ACCENT}",
+                    "borderRadius": "6px", "padding": "8px 10px",
+                    "color": TEXT, "fontSize": "0.74em", "lineHeight": "1.45",
+                    "fontFamily": MONO, "fontWeight": "normal",
+                },
+            ),
+        ],
+        className="ivg-info",
+        style={"display": "inline-block", "verticalAlign": "middle", "marginLeft": "5px"},
     )
 
 

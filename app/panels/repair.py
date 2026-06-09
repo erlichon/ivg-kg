@@ -48,28 +48,32 @@ def _claim_chip(cid: str, text: str, status: ClaimStatus) -> html.Div:
     )
 
 
-def _repair_card(item: dict, done: bool) -> html.Div:
+def _repair_card(item: dict, done: bool, clickable: bool) -> html.Div:
     is_inject = item["kind"] == "inject"
     tag = "✚ inject (new KG triple)" if is_inject else "↺ restore (withheld)"
     tag_color = "#3fb950" if is_inject else theme.ACCENT
-    return html.Div(
-        [
-            html.Div(tag, style={"color": tag_color, "fontSize": "0.68em",
-                                 "fontWeight": "bold", "marginBottom": "3px"}),
-            html.Div(item["label"], style={"color": theme.TEXT, "fontSize": "0.76em"}),
-            html.Div("✓ applied" if done else "click to apply",
-                     style={"color": theme.MUTED if done else theme.FAINT,
-                            "fontSize": "0.68em", "marginTop": "3px"}),
-        ],
-        id={"type": "repair-item", "item": item["id"]},
-        n_clicks=0,
-        style={
-            "background": theme.PANEL if not done else "#10301c",
-            "border": f"1px solid {tag_color if not done else '#3fb950'}",
-            "borderRadius": "6px", "padding": "8px 10px", "cursor": "pointer",
-            "opacity": "0.6" if done else "1", "minWidth": "210px", "flex": "0 0 auto",
-        },
-    )
+    footer = ("✓ applied" if done else "click to apply") if clickable else "preview"
+    children = [
+        html.Div(tag, style={"color": tag_color, "fontSize": "0.68em",
+                             "fontWeight": "bold", "marginBottom": "3px"}),
+        html.Div(item["label"], style={"color": theme.TEXT, "fontSize": "0.76em"}),
+        html.Div(footer, style={"color": theme.MUTED if done else theme.FAINT,
+                                "fontSize": "0.68em", "marginTop": "3px"}),
+    ]
+    style = {
+        "background": "#10301c" if done else theme.PANEL,
+        "border": f"1px solid {'#3fb950' if done else tag_color}",
+        "borderRadius": "6px", "padding": "8px 10px",
+        "minWidth": "210px", "flex": "0 0 auto",
+        "cursor": "pointer" if clickable else "default",
+        "opacity": "0.55" if (done or not clickable) else "1",
+    }
+    if clickable:
+        # interactive (knowledge-absent): clicking applies the repair (scripted)
+        return html.Div(children, id={"type": "repair-item", "item": item["id"]},
+                        n_clicks=0, style=style)
+    # preview only — pure visual mock of the interface, no action wired
+    return html.Div(children, style=style)
 
 
 def render_repair_body(condition: str, repaired: list[str] | None = None) -> html.Div:
@@ -83,22 +87,24 @@ def render_repair_body(condition: str, repaired: list[str] | None = None) -> htm
         style={"display": "flex", "gap": "8px", "flexWrap": "wrap", "marginBottom": "10px"},
     )
 
-    if condition != "knowledge-absent":
-        note = (
-            "Full context — no evidence is withheld; switch to "
-            "knowledge-absent to restore/inject."
-            if condition == "full"
-            else "Content-absent — the description is withheld; the structural "
-                 "claims here are unaffected (manipulation check)."
-        )
-        return html.Div([chips, html.Div(note, style={"color": theme.FAINT,
-                                                      "fontSize": "0.76em"})])
-
-    lev = repair_leverage(condition, repaired)
+    interactive = condition == "knowledge-absent"
     cards = html.Div(
-        [_repair_card(it, it["id"] in repaired) for it in REPAIR_ITEMS],
+        [_repair_card(it, it["id"] in repaired, clickable=interactive) for it in REPAIR_ITEMS],
         style={"display": "flex", "gap": "10px", "flexWrap": "wrap", "marginBottom": "10px"},
     )
+
+    if not interactive:
+        note = (
+            "Full context — no evidence is withheld. The repair palette below is a "
+            "preview of the interface; switch to knowledge-absent to apply restore / inject."
+            if condition == "full"
+            else "Content-absent — the description is withheld; the structural claims "
+                 "here are unaffected (manipulation check). Repair palette shown as preview."
+        )
+        return html.Div([chips, cards, html.Div(note, style={"color": theme.FAINT,
+                                                            "fontSize": "0.74em"})])
+
+    lev = repair_leverage(condition, repaired)
     leverage_color = "#3fb950" if lev else theme.MUTED
     leverage = html.Div(
         [
@@ -106,6 +112,8 @@ def render_repair_body(condition: str, repaired: list[str] | None = None) -> htm
             html.Span(f"+{lev}", style={"color": leverage_color, "fontWeight": "bold",
                                         "fontSize": "1.2em"}),
             html.Span(" claims re-grounded", style={"color": theme.FAINT, "fontSize": "0.75em"}),
+            html.Span("  · scripted visual mock (no real injection)",
+                      style={"color": theme.FAINT, "fontSize": "0.7em"}),
         ]
     )
     return html.Div([chips, cards, leverage])

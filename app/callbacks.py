@@ -128,20 +128,26 @@ def register_callbacks(
     # ---- F: node tap / reset -> zoom elements + entity-detail (#7/#8) -------
     @app.callback(
         Output("subgraph", "elements"),
+        Output("subgraph", "layout"),
         Output("entity-detail", "children"),
         Input("subgraph", "tapNodeData"),
         Input("reset-view", "n_clicks"),
         prevent_initial_call=True,
     )
     def node_zoom_and_detail(node_data, _reset):  # noqa: ANN001
+        # A fresh layout dict each call forces cytoscape to re-run cose + re-fit
+        # the viewport (otherwise the pan/zoom can stay stuck after an elements
+        # swap, which made "reset view" look like it did nothing).
+        layout = {"name": "cose", "animate": False, "fit": True, "padding": 24}
         trigger_id = dash.ctx.triggered_id
         if trigger_id == "reset-view":
-            return overview_elements, node_detail_content(None)
+            return overview_elements, layout, node_detail_content(None)
         # tapNodeData fired
         if not node_data:
             raise PreventUpdate
         return (
             ego_elements(overview_elements, node_data["id"]),
+            layout,
             node_detail_content(node_data),
         )
 
