@@ -25,7 +25,7 @@ Sources:
 | Related work | 10 most relevant references; AT LEAST 5 must be from lecture slides/papers; each reference gets a 1-2 line description of why relevant and how you use or improve it |
 | Methodology | Pointwise description of relevant steps; for complex preprocessing, add a figure with main processing blocks and data flow |
 | Interaction design | Describe high-level and low-level interactions following the "science of interaction" paper (Pike 2009); explain how they help gain insight; FIGURE showing main components and their connections; "A simplified version of the main figure in the foundation model multimedia analytics paper (or the version discussed in the lectures for Multimedia Analytics for AI) could be a good starting point" |
-| Evaluation design | How you will evaluate following the evaluation lecture techniques; recruted users OR analytic quality / simulated actors? |
+| Evaluation design | How you will evaluate following the evaluation lecture techniques; recruited users OR analytic quality / simulated actors? [Lecture 4 detail: the lecture teaches four techniques -- benchmark, Likert questionnaire, insight-based (North 2006), and simulation-based (Zahalka 2015 analytic quality). The recommended combination is simulation for quantitative + insight-based for qualitative depth. The simulated-user approach requires: (1) define the interaction model state machine, (2) define an oracle-knowledge ideal user, (3) count interaction costs per high-level task, (4) measure dK/dt as knowledge change per unit interaction cost. See COURSE-DISTILLATION.md Section L4.11 for full operationalization.] |
 | Implementation design | Motivated choice for Dash/Plotly architecture; take the provided demo system as starting point |
 | Planning | How to realize in time for demo + report deadline; balance innovation vs feasibility |
 
@@ -38,8 +38,10 @@ Sources:
 
 ### Key mandatories
 - The "science of interaction" (Pike 2009) MUST be referenced in the interaction design section
+- Yi et al. 2007 (7 interaction categories) should accompany Pike 2009 -- the lecture teaches them together
+- The interaction design figure should include a state-machine diagram (states = views, transitions = Yi07 category labels); the lecture explicitly recommends this format
 - The MMA model main figure MUST inform the interaction design figure
-- At least 5 references from lecture slide lists
+- At least 5 references from lecture slide lists; Lecture 4 alone provides 6 qualifying refs: North06, Pike09, Yi07, Zahalka2015, VanWijk06, Sacha14
 - Three contributions stated explicitly as bullets
 
 ---
@@ -123,7 +125,9 @@ Reference: https://ieeevis.org/year/2026/info/call-participation/area-model/
    - Interesting quantitative OR qualitative results reported?
    - Will the paper have impact on the multimedia analytics community?
    - Has the method been evaluated following one of the techniques described in the lectures?
+     [Lecture 4 techniques: benchmark / Likert questionnaire / insight-based (North 2006) / simulation-based analytic quality (Zahalka 2015)]
    - OR if not feasible: clear description how future work could best evaluate the tool
+   - NOTE from Lecture 4: the lecture recommends combining techniques for the most complete evaluation (p.96); citing both Zahalka2015 (quantitative) and North2006 (qualitative) in the evaluation section directly answers this criterion
 
 ### Mandatory inclusions
 - GitHub link to software + demo code
