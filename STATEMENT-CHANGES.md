@@ -415,3 +415,167 @@ definitions, §8/§10) and `tasks/TASKS.md` (S2, UI2, UI4, UI5, GR8, GR11, **new
 mockup's example shows 2-hop *retrieval* (father's DOB is a direct triple once hopped) — keep a
 genuinely path-only case in the demo to exhibit *Supportable*; node-cap threshold value; the exact
 palette hex.
+
+---
+
+## Addendum (2026-06-10) — generator/verifier separation + slot/variant alignment (SPEC+TASKS applied; statement redlines PENDING)
+
+Locked the design decision that the **generator and verifier are two different systems with opposite
+goals**, and corrected a latent bug in the §4.8 diagnostics. Applied to `spec/SPEC-text.md` and
+`tasks/TASKS.md` only; `project_statement.md` was **not** edited (three redlines proposed below are
+PENDING user approval).
+
+**Decisions and where applied:**
+- **Generator/verifier role separation (design principle), incl. NO-SELF-VERIFICATION.** Generator =
+  system under test, stochastic on purpose (sampled, temp ~0.7), seeded
+  `seed=f(question_id,condition,draw_index)`, N draws/condition. Verifier = measurement instrument,
+  deterministic on purpose, always grades against the **full KG**, and must be a **different model
+  family** from the generator (correlated blind spots otherwise). Every verifier-side LLM stage
+  (extraction) pinned **greedy/temp 0**; raw `entailment_score` persisted (margin to `tau` =
+  deterministic confidence); float32 + fixed batch order on MPS. KGR deviation stated (replace KGR's
+  LLM-verifier stage with a deterministic entailment gate over symbolically selected evidence, so
+  generation is the only stochastic stage; classifier error calibrated separately). Applied: SPEC
+  §4.3 new "Generator vs verifier" preamble; SPEC §4.3(A) structured `(h,r,t)` greedy extraction;
+  TASKS GR5, GR8 (persists `entailment_score`), GR11 (seeding scheme), GR7/S1 (model-id notes),
+  Invariant **#14**.
+- **Two-level claim alignment (slot vs variant).** `slot_key=(head_entity_id, relation)` (the fact
+  slot); `claim_key = slot_key + normalized_value` (the variant). Applied: SPEC §4.2 `ClaimRecord`
+  (`slot_key`, `aligned`/`unaligned_reason`, `entailment_score` confirmed present), SPEC §4.3(B)
+  property-alias + inverse-orientation table as a named artifact, TASKS GR6 sub-bullet, GR8.
+- **LATENT §4.8 BUG FIXED — metrics re-anchored to the slot.** Because the verifier is deterministic
+  AND grades against the full KG, a **variant has exactly one status** (invariant across draws and
+  conditions); so `stability` / `absence_leverage` / `fabrication_induction` are **degenerate at the
+  `claim_key` (variant) level** (entropy 0, P[grounded] in {0,1}) and are only well-defined at the
+  **slot** level (per-draw outcome = the filling variant's status, or `absent`; denominator N).
+  Re-anchored all §4.8 diagnostics from `claim_key` to `slot_key`; added `presence_rate`, a
+  **required variant breakdown**, `intra_answer_contradiction`, and the unaligned bucket/rate
+  (never force-aligned). Applied: SPEC §4.2 `ClaimDiagnostics` + new `VariantStat`, SPEC §4.8 rewrite,
+  SPEC §4.5 per-claim card (slot-anchored + variant breakdown), TASKS EX5, UI4, TS2 invariants,
+  Invariant **#15**.
+- **Amendment 3 — verifier model is an accuracy decision, not latency.** Verification runs in offline
+  precompute (GR11), not the interactive hot path, so per-pair latency is second-order; prioritize
+  accuracy; open choice (stronger 7B / DeBERTa-v3-large vs efficient Flan-T5-large MiniCheck), do not
+  hard-code a downgrade. Applied: SPEC §4.3 preamble, TASKS GR7 + S1 notes.
+- **Amendment 4 — two distinct per-claim views, not blurred.** (i) the generation-variance
+  distribution over N draws (the RQ2 science, §4.8) vs (ii) a deterministic support-attribution
+  counterfactual on a FIXED claim (remove a triple/path, re-verify the same claim against the edited
+  KG; instant, reuses §4.6 graph-edit machinery). Must be labelled distinctly. Applied: SPEC §4.8 note
+  + §4.5 card, TASKS UI4.
+- **Amendment 5 — statistical honesty.** Slot proportions carry `SE=sqrt(p(1-p)/N)` (NOT the ~0.5
+  Bernoulli std); `absence_leverage` is a difference of proportions, `SE~sqrt(2 p(1-p)/N)~0.16` at
+  N=20, so only leverages of roughly >=0.3 are distinguishable from noise; **N=20 is a floor**; error
+  bars must be SE/CI of the proportion with meaning pinned, and the small-N caveat must be prominent.
+  Applied: SPEC §4.8, TASKS EX5, Invariant #15.
+- **Classifier-error reframe (§4.7).** Curated **QA set per slice** with **adversarial value-swapped
+  negatives**; alignment/linking **coverage** reported as a pipeline metric distinct from the grading
+  gate error; `tau`/`k` frozen after disjoint-fold calibration, never tuned post-hoc; kept separate
+  from the image-label reference. Applied: SPEC §4.7, TASKS GR10, UI4 Trust caption.
+
+**THREE PROPOSED `project_statement.md` redlines — PENDING USER APPROVAL (not applied):**
+- **(a) KGR paragraph (around §2 / §5.5 mechanism):** add that we **replace KGR's LLM verification
+  stage with a deterministic entailment gate over symbolically selected evidence**, so that
+  **generation is the only stochastic stage** (classifier error calibrated separately).
+- **(b) §5.4:** state that claims are aligned in KG coordinates at **two levels — the fact slot
+  (head+relation) and the asserted value (the variant)**.
+- **(c) §5.8:** the classifier-error sample = a **curated per-slice QA set with adversarial
+  wrong-value negatives** (and report alignment/linking coverage distinctly from gate error).
+
+**Two OPEN decisions recorded:**
+- **Verifier model:** accuracy-first 7B / DeBERTa-v3-large vs efficient Flan-T5-large MiniCheck
+  (leaning accuracy; precompute makes latency second-order — do not hard-code a downgrade).
+- **Live path:** whether the interactive path verifies live or **always serves precomputed** run-sets
+  (current framing: reported figures + on-stage demo run off frozen run-sets).
+
+---
+
+## Addendum (2026-06-10) — metrics simplification: two modes + support-frequency + two-layer perturbation (APPLIED to statement + SPEC + TASKS)
+
+Replaced the prior combined analytics design with a simpler two-mode design. **Applied to all three
+docs** (`project_statement.md` at altitude, `spec/SPEC-text.md` the full rewrite, `tasks/TASKS.md`
+minimal reconciliation). No change to the three-way status taxonomy + "Supportable" UI label,
+hue=status, the multimodal/image-axis gating + slices, or the §6 validation controls.
+
+**Two-mode design (the core change).**
+- **SINGLE-RUN mode:** one generated answer; the graph; each claim's support-path highlight
+  (attribution = "what this verdict rests on"); per-claim status; the status percentages for that one
+  run with **NO SE/STD** (it is a single sample).
+- **MULTI-RUN mode (N=20 default, N selectable):** re-runs the query N times and shows **(a)** the
+  **answer-level status distribution as mean +/- SE** (per-run fraction of claims retrieved /
+  reasoned-supportable / fabricated, computed per run, then mean+SE across runs), and **(b)**
+  **support-frequency** — for each KG node and triplet, the fraction of the N runs in which it was
+  **used** (lies on the support path of >=1 grounded claim) — as node-size/edge-weight. Support-
+  frequency is **observational** importance, explicitly **NOT** causal leverage.
+- **Crucial — NO cross-run claim alignment.** The design aligns only **stable KG-item IDs**
+  (entities, triplets) for support-frequency, and aggregates claims only as **answer-level
+  fractions**. Within a run, `claim_id` is the only claim identifier. **Not aligning claims across
+  runs is why this design is simpler.**
+
+**Dropped metrics (removed entirely).**
+- The single-run **deterministic re-grounding "leverage score"** (asymmetric/redundant).
+- **`absence_leverage`** and **`fabrication_induction`** SCALARS — RQ2 is now a **distribution
+  comparison** across {full, content-withheld, knowledge-withheld} (the report may state the
+  difference of means).
+- **Per-claim stability** and the **slot/variant** machinery (`slot_key`, `claim_key`-as-variant,
+  `VariantStat`, `presence_rate`, the variant breakdown, `intra_answer_contradiction`, the
+  unaligned/off-graph-fabrication bucket, and the "one status per variant" corollary).
+
+**Kept / reframed.**
+- **`repair_leverage` (DECISION A) — KEPT, reframed as a COUNT:** the number of claims that flip
+  **FABRICATED → grounded** when the analyst restores the missing evidence (edit-the-KG) and
+  **re-runs** (regeneration-based, aligned by `claim_id` **within that one answer's before/after**).
+  This is the gap-repair flow with a count on it; it preserves RQ3, contribution 3, and the CogMG
+  differentiation. It is **not** the dropped re-grounding leverage — regeneration rewrites wrong
+  values, so the FABRICATED→grounded flips are real.
+- **Support-frequency — ADDED** (observational, see above).
+
+**Two perturbation layers (distinct grading semantics) — load-bearing.**
+- **Withhold-from-context (RQ2 absence experiment):** hides content (description) or structural
+  (triplet) evidence from the **generation context only**; the item **stays in the grading
+  reference**; classification grades against the **FULL** reference. Multi-run; result = the
+  distribution shift.
+- **Edit-the-KG (gap-repair / free exploration):** genuinely adds/removes a triplet or node content
+  from the KG itself, **changing the ground truth**; classification then grades against the
+  **current (edited)** reference. Powers the gap-repair demo and `repair_leverage`.
+- Stated explicitly: **withhold-from-context never changes the grading reference; edit-the-KG
+  deliberately changes it.** Both grade vs the current reference; the difference is whether the edit
+  touched the reference.
+
+**Generator / verifier (principle kept; open decisions finalized).**
+- The generator/verifier separation principle is retained; the previously-PENDING statement redline
+  **(a)** — replace KGR's LLM verification stage with a **deterministic entailment gate over
+  symbolically selected evidence**, so generation is the only stochastic stage and classifier error
+  is calibrated separately — is now **APPLIED** to the statement (§2).
+- **Verifier model decision (finalized):** accuracy-first — **DeBERTa-v3-large on the LIVE path**,
+  **MiniCheck-7B for offline precompute/calibration**; cache verification by **distinct
+  evidence-pair**. **Live path DOES verify live (confirmed).** Generator stays the stochastic
+  system-under-test; verifier stays deterministic and a different model family (no self-verification).
+  Both previously-OPEN decisions (verifier model; live path) are now **closed**.
+
+**Where applied.**
+- `project_statement.md`: §2 (KGR deterministic-gate clause added), §3 (RQ2 = distribution shift; RQ3
+  repair-leverage = flip count), §4 (contribution 2 notes distribution shifts), §5.6 (two perturbation
+  layers + grading semantics), §5.7 (repair-leverage count + gap-repair scenario), §6 (interface
+  reframed around the two modes; support-frequency as observational importance).
+- `spec/SPEC-text.md`: §4.2 (removed slot/variant + `VariantStat`/`ClaimDiagnostics`; added
+  `SingleRunStatusSummary` / `StatusMeanSE` / `AnswerDiagnostics` (status mean+SE + support_frequency)
+  / `RepairResult` count), §4.3 (verifier-model decision finalized; gate model + pair-cache; linking
+  aligns KG-item IDs not claims), §4.4 (two perturbation layers), §4.5 (two-mode Analytics panel;
+  small-N caveat), §4.6 (repair-leverage = flip count on restore + re-run), §4.7 (coverage reframed
+  off slots), §4.8 (rewritten: single-run %, multi-run mean+/-SE, support-frequency + "used" def,
+  repair-leverage cross-ref, two-layer grading, explicit no-cross-run-claim-alignment), §8/§10/§11
+  (terminology + risk reconciliation).
+- `tasks/TASKS.md`: Invariants kit (#8 reworded; #13 -> two modes / no cross-run alignment; #14
+  verifier decision finalized; #15 replaced by two-perturbation-layers; **new #16** support-frequency
+  observational-not-causal), S1/GR7 (verifier decision), GR6/GR8 (KG-item-ID alignment, no
+  slot/claim_key), EX3 (repair-leverage = flip count on restore + re-run), EX5 (two-mode diagnostics;
+  dropped metrics), TS2 (dropped deterministic-leverage identity + one-status-per-variant; kept
+  grade-against-reference + bit-identical verification), UI4/UI5/GR11 + tier note (terminology + mode
+  reframe). Dependency graph and waves left untouched.
+
+**Prior PENDING/OPEN items resolved by this addendum:** statement redline **(a)** = APPLIED;
+redlines **(b)** (two-level slot/value alignment) and **(c)** (per-slice QA-set sample) are
+SUPERSEDED — (b) by the no-cross-run-claim-alignment decision (slot/variant dropped), (c) folded into
+SPEC §4.7 (the curated per-slice QA set with adversarial negatives remains in SPEC, not promoted to
+the statement). Verifier-model and live-path OPEN decisions = CLOSED (above). The previously-applied
+slot/variant addendum (2026-06-10, earlier) is **superseded** by this one. F6 (reference [7]) remains
+open, on the user.
