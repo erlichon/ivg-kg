@@ -244,8 +244,18 @@ class ClaimRecord(BaseModel):
         active_perturbations: Manifest-entry ids whose withheld triples/content
             touch at least one of this claim's linked entities.
         entailment_score: NLI/visual-probe gate score (MiniCheck or visual probe).
-        claim_key: Canonical (head_entity, relation, normalized_value) key that
-            aligns "the same claim" across draws of a RunSet (SPEC-text §4.8).
+        slot_key: Canonical (head_entity, relation) key — the fact SLOT (§4.8).
+            Canonicalized via the §4.3(B) property-alias / inverse-orientation
+            table so the same slot is keyed identically regardless of surface
+            phrasing or relation direction.
+        claim_key: slot_key + normalized_value — the VARIANT.  Aligns "the same
+            claim" (same slot AND same asserted value) across draws of a RunSet.
+            A variant has exactly one status (deterministic verifier, full-KG
+            grading); the slot's mixed distribution reflects WHICH variant the
+            generator emitted, not a per-claim status flip (§4.8).
+        aligned: False when the claim maps to no slice slot (unmappable
+            subject/predicate); such claims are never force-aligned (§4.3(B)/§4.8).
+        unaligned_reason: Reason code when aligned is False.
         spurious_path: True when a multi-hop path passed the value-sensitive
             entailment gate but is not legitimate support (Supportable claims).
         spurious_reason: Reason code/text when spurious_path is True (§4.8).
@@ -257,7 +267,10 @@ class ClaimRecord(BaseModel):
     text: str
     status: ClaimStatus
     support_source: SupportSource
+    slot_key: str | None = None
     claim_key: str | None = None
+    aligned: bool = True
+    unaligned_reason: str | None = None
     linked_entities: list[LinkedEntity]
     grounding_path: GroundingPath
     active_perturbations: list[str] = Field(default_factory=list)
@@ -326,26 +339,50 @@ class GroundingRun(BaseModel):
 # Diagnostics aggregated over a RunSet (the N draws x conditions) — SPEC-text §4.8
 # ---------------------------------------------------------------------------
 
-# Pseudo-status used in per-draw / stacked-bar accounting when a canonical claim
-# is not emitted by a given draw (distinct from FABRICATED). Not a ClaimStatus.
+# Pseudo-status used in per-draw / stacked-bar accounting when a SLOT is not
+# filled by a given draw (distinct from FABRICATED). Not a ClaimStatus.
 ABSENT = "absent"
 
 
-class ClaimDiagnostics(BaseModel):
-    """One canonical claim, aggregated across the RunSet (SPEC-text §4.8).
+class VariantStat(BaseModel):
+    """One VARIANT filling a slot: its single fixed status + how often it appeared.
 
-    Drives the per-claim Analytics view (#6): the per-condition stacked-bar
-    small-multiple + the stability scalar + the spurious-path warning chip.
+    The verifier is deterministic and grades against the full KG, so a variant's
+    ``status`` is INVARIANT across draws and conditions (SPEC-text §4.8). The only
+    thing that varies is ``draw_frequency`` — how often the generator emitted this
+    particular value for the slot. This is what explains a mixed slot distribution:
+    the per-variant status meter never moves; only which variant appears does.
     """
 
-    claim_key: str
-    text: str
-    status: ClaimStatus
-    support_source: SupportSource
-    stability: float  # 1 - H(status|FULL)/log K over the N FULL draws
-    modal_status: ClaimStatus
+    normalized_value: str
+    status: ClaimStatus  # invariant per variant
+    text: str = ""  # a representative surface form of this variant
+    draw_frequency: dict[str, int] = Field(default_factory=dict)  # condition -> count of draws
+
+
+class ClaimDiagnostics(BaseModel):
+    """One fact SLOT, aggregated across the RunSet (SPEC-text §4.8).
+
+    SLOT-anchored (``slot_key``), NOT variant-anchored: because the verifier is
+    deterministic and grades against the full KG, a variant has exactly one
+    status, so stability / absence_leverage / fabrication_induction are degenerate
+    at the variant level and only well-defined at the slot level. Per draw the
+    outcome is the status of whichever variant filled the slot (or ``absent``).
+
+    Drives the per-claim Analytics view (#6): the per-condition stacked-bar
+    small-multiple + the variant breakdown + the stability scalar + the
+    spurious-path chip.
+    """
+
+    slot_key: str  # canonical head + relation
+    text: str  # a representative surface form for the slot
+    presence_rate: float  # fraction of the N FULL draws the slot is filled (1 - P[absent])
+    variants: list[VariantStat] = Field(default_factory=list)  # REQUIRED breakdown
+    intra_answer_contradiction: bool = False  # a single draw asserting two variants of the slot
+    stability: float  # SLOT-level: 1 - H(outcome|FULL)/log K over the N FULL draws
+    modal_status: ClaimStatus  # most common per-draw outcome under FULL
     modal_fraction: float  # e.g. 0.9 -> "retrieved 9/10"
-    n_full: int  # number of FULL draws the modal fraction is over
+    n_full: int  # number of FULL draws the fractions/frequencies are over
     # condition -> {status_or_"absent": fraction over N} (stacked-bar input)
     status_by_condition: dict[str, dict[str, float]]
     absence_leverage: dict[str, float] = Field(default_factory=dict)
@@ -355,14 +392,18 @@ class ClaimDiagnostics(BaseModel):
 
 
 class AnswerDiagnostics(BaseModel):
-    """The full-answer analytics view aggregated over the RunSet (#5)."""
+    """The full-answer analytics view aggregated over the RunSet (#5).
+
+    All variance here is GENERATION variance: the verifier is deterministic, so
+    the spread across the N draws reflects the stochastic generator under test,
+    not repeated grading. Error bars on the distribution are the SE of the
+    proportion (sqrt(p(1-p)/N)), derived in the chart from the fraction + N — not
+    a per-draw std (SPEC-text §4.8 statistical-honesty).
+    """
 
     question: str
-    n_generations: int
-    # mean per-draw fraction over the N FULL draws (column chart heights)
+    n_generations: int  # N generation draws per condition
+    # fraction of claims in each grade over the N FULL draws (column chart heights)
     status_distribution: dict[str, float]
-    # population std of the per-draw fraction over the N FULL draws (error bars)
-    status_distribution_std: dict[str, float] = Field(default_factory=dict)
-    fabrication_rate: float  # mean per-draw fabricated fraction over the N FULL draws
-    fabrication_rate_std: float = 0.0
+    fabrication_rate: float  # fabricated fraction over the N FULL draws
     claim_diagnostics: list[ClaimDiagnostics]

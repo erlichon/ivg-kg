@@ -173,11 +173,15 @@ def test_settings_toggle_callback_registered():
     assert sum(1 for k in app.callback_map if "settings-panel.style" in k) == 1
 
 
-def test_status_distribution_figure_with_std():
+def test_status_distribution_error_bars_are_proportion_se():
+    from app.charts.status_dist import proportion_se
+
+    # SE of a proportion = sqrt(p(1-p)/N), NOT the Bernoulli per-draw std (~0.5).
+    assert proportion_se(0.0, 20) == 0.0
+    assert proportion_se(1.0, 20) == 0.0
+    assert abs(proportion_se(0.5, 20) - (0.25 / 20) ** 0.5) < 1e-12
     d = fx.mock_answer_diagnostics(20)
-    fig = make_status_distribution_figure(
-        d.status_distribution, d.n_generations, d.status_distribution_std
-    )
+    fig = make_status_distribution_figure(d.status_distribution, d.n_generations)
     assert isinstance(fig, go.Figure)
 
 

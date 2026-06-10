@@ -21,10 +21,14 @@ from ivg_kg.mock.fixtures import (
 )
 
 _INFO_REPAIR = (
-    "Graph edits.\n"
-    "REMOVE a triple by tapping its edge in the Subgraph panel → it is ablated and "
-    "the answer is regenerated without it. Removed triples appear here with '+ re-add' "
-    "(the RQ3 repair).\n\n"
+    "Graph edits — a DETERMINISTIC re-verification (NOT a regeneration).\n"
+    "The claim text is held FIXED; removing/injecting a triple re-grades the SAME "
+    "claims against the edited KG (instant, bit-stable). This is a different view "
+    "from the Analytics per-claim card, which is the N-draw GENERATION-variance "
+    "distribution — here nothing is re-sampled.\n\n"
+    "REMOVE a triple by tapping its edge in the Subgraph panel → it leaves the KG "
+    "and the fixed claims re-grade; removed triples appear here with '+ re-add' "
+    "(the RQ3 repair-leverage counterfactual).\n\n"
     "INJECT adds a NEW triple the KG lacked (CogMG) — a model suggestion pre-fills the "
     "form, but you edit subject / relation / value before inserting. After every edit "
     "the claims are re-verified against the full reference (the answer + chips update). "
@@ -123,7 +127,15 @@ def get_repair_panel() -> html.Div:
                            style={"color": theme.MUTED, "fontSize": "0.75em",
                                   "letterSpacing": "0.1em"}),
                  theme.info_icon(_INFO_REPAIR)],
-                style={"marginBottom": "10px"},
+                style={"marginBottom": "4px"},
+            ),
+            html.Div(
+                "Deterministic re-verification — the claim text is FIXED; an edit "
+                "re-grades the SAME claims against the edited KG (instant, no "
+                "regeneration). Distinct from the N-draw generation-variance view in "
+                "Analytics.",
+                style={"color": theme.FAINT, "fontSize": "0.7em", "fontStyle": "italic",
+                       "marginBottom": "10px", "lineHeight": "1.4"},
             ),
             _inject_form(),
             html.Div(render_repair_body(None, []), id="repair-body"),

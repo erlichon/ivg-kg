@@ -41,7 +41,7 @@ def make_condition_breakdown_figure(diag: ClaimDiagnostics) -> go.Figure:
 
     fig.update_layout(
         barmode="stack",
-        title={"text": "Status by condition (% over N draws)", "font": {"size": 12}},
+        title={"text": "Status by condition (% over N generation draws)", "font": {"size": 12}},
         plot_bgcolor=theme.PANEL_ALT,
         paper_bgcolor=theme.PANEL,
         font={"color": theme.TEXT, "family": theme.MONO, "size": 10},

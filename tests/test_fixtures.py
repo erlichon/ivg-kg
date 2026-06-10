@@ -98,11 +98,21 @@ def test_aggregate_direct_runset_matches_helper():
     assert aggregate_runset(runs).model_dump() == fx.mock_answer_diagnostics(10).model_dump()
 
 
-def test_distribution_has_mean_and_std():
+def test_slot_anchored_diagnostics_and_variant_breakdown():
+    # Diagnostics are anchored on the SLOT (head+relation), not the variant; the
+    # multi-variant birth-date slot exposes both a retrieved and a fabricated value.
     d = fx.mock_answer_diagnostics(20)
-    assert set(d.status_distribution_std) == set(d.status_distribution)
-    assert all(v >= 0 for v in d.status_distribution_std.values())
-    assert d.fabrication_rate_std >= 0.0
+    by_slot = {cd.slot_key: cd for cd in d.claim_diagnostics}
+    dob = by_slot[fx.SLOT_FDOB]
+    statuses = {v.normalized_value: v.status for v in dob.variants}
+    assert statuses[fx.VAL_DOB_TRUE] == ClaimStatus.RETRIEVED
+    assert statuses[fx.VAL_DOB_FALSE] == ClaimStatus.FABRICATED
+    # presence_rate < 1 because the slot is sometimes absent across draws
+    assert 0.0 < dob.presence_rate < 1.0
+    # every variant carries a per-condition draw frequency
+    assert all(v.draw_frequency for v in dob.variants)
+    # the spurious supportable lives on Chopin's own place-of-birth slot
+    assert by_slot[fx.SLOT_CPOB].spurious_path
 
 
 def test_graph_editor_logic():

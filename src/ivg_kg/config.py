@@ -49,6 +49,12 @@ WDQS_USER_AGENT: str = (
 LOCAL_LLM_MODEL_ID: str = "meta-llama/Llama-3.2-3B-Instruct"
 
 # MiniCheck entailment model (Apache-2.0); used by BaseEntailmentGate.
+# TODO(verifier-model): this is the VERIFIER (deterministic measurement instrument),
+# not the generator. Verification runs in offline precompute (SPEC-text §4.3/§4.8),
+# so per-pair latency is second-order — prioritize accuracy. The exact model is an
+# OPEN accuracy-first decision (stronger 7B / DeBERTa-v3-large vs the efficient
+# Flan-T5-large MiniCheck); do not hard-code a latency-driven downgrade. Must also
+# stay a DIFFERENT model family from the generator (no self-verification, §4.3).
 MINICHECK_MODEL_ID: str = "bespokelabs/Bespoke-MiniCheck-7B"
 
 # post-M-BOOKS (gated image axis) — not used in P0

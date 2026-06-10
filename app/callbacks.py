@@ -56,7 +56,7 @@ def register_callbacks(
 ) -> None:
     """Register all callbacks (closures over the mock data)."""
     claims_by_id = {c.claim_id: c for c in run.claims}
-    id_to_key = {c.claim_id: c.claim_key for c in run.claims}
+    id_to_slot = {c.claim_id: c.slot_key for c in run.claims}
     node_labels = node_labels_from_elements(elements)
     base_triple_ids = set(ALL_TRIPLE_IDS)
 
@@ -117,11 +117,11 @@ def register_callbacks(
         diag = diagnostics_by_n.get(int(n)) if n is not None else None
         if not selected or diag is None:
             return per_claim_sections([])
-        by_key = {c.claim_key: c for c in diag.claim_diagnostics}
+        by_slot = {c.slot_key: c for c in diag.claim_diagnostics}
         diags = [
-            by_key[id_to_key[cid]]
+            by_slot[id_to_slot[cid]]
             for cid in selected
-            if cid in id_to_key and id_to_key.get(cid) in by_key
+            if cid in id_to_slot and id_to_slot.get(cid) in by_slot
         ]
         return per_claim_sections(diags)
 
@@ -135,9 +135,7 @@ def register_callbacks(
         diag = diagnostics_by_n.get(int(n)) if n is not None else None
         if diag is None:
             raise PreventUpdate
-        fig = make_status_distribution_figure(
-            diag.status_distribution, diag.n_generations, diag.status_distribution_std
-        )
+        fig = make_status_distribution_figure(diag.status_distribution, diag.n_generations)
         return fig, fab_rate_readout(diag)
 
     # ---- Elem: graph edits + node zoom -> subgraph elements -----------------

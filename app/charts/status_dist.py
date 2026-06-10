@@ -1,38 +1,49 @@
-"""Full-answer claim-status distribution column chart (SPEC-text §4.5 #5).
+"""Full-answer claim-status distribution column chart (SPEC-text §4.5 #5 / §4.8).
 
-Hue encodes status (the one fixed 3-grade palette). Bars start at y=0.
+Hue encodes status (the one fixed 3-grade palette). Bars start at y=0. Error bars
+are the **standard error of the proportion** SE = sqrt(p(1-p)/N) over the N
+GENERATION draws — NOT a per-draw std. All spread is generation variance (the
+verifier is deterministic).
 """
 from __future__ import annotations
+
+import math
 
 import plotly.graph_objects as go
 
 from app import theme
 
 
+def proportion_se(p: float, n: int) -> float:
+    """Standard error of a proportion p over N draws: sqrt(p(1-p)/N) (§4.8)."""
+    if n <= 0:
+        return 0.0
+    p = min(max(p, 0.0), 1.0)
+    return math.sqrt(p * (1.0 - p) / n)
+
+
 def make_status_distribution_figure(
     distribution: dict[str, float],
     n: int,
-    std: dict[str, float] | None = None,
 ) -> go.Figure:
-    """Column chart of the claim-status distribution over the N FULL draws.
+    """Column chart of the claim-status distribution over the N FULL generation draws.
 
-    Bars are the MEAN per-draw fraction; error bars are +/- 1 std over the N
-    draws (SPEC-text §4.5 #5).
+    Bars are the fraction of claims in each grade; error bars are the SE of the
+    proportion (sqrt(p(1-p)/N)) — the uncertainty on that fraction at N draws,
+    not the Bernoulli per-draw std (SPEC-text §4.8).
 
     Parameters
     ----------
     distribution:
-        ClaimStatus value -> mean per-draw fraction (the three grades).
+        ClaimStatus value -> fraction of claims in that grade (the three grades).
     n:
-        Number of generations the distribution is computed over.
-    std:
-        ClaimStatus value -> population std of the per-draw fraction (error bars).
+        Number of generation draws the distribution is computed over.
     """
-    std = std or {}
     statuses = theme.STATUS_ORDER
     labels = [theme.status_label(s) for s in statuses]
-    values = [round(100 * distribution.get(s, 0.0), 1) for s in statuses]
-    errors = [round(100 * std.get(s, 0.0), 1) for s in statuses]
+    props = [distribution.get(s, 0.0) for s in statuses]
+    values = [round(100 * p, 1) for p in props]
+    errors = [round(100 * proportion_se(p, n), 1) for p in props]
     colors = [theme.status_color(s) for s in statuses]
 
     fig = go.Figure(
@@ -51,11 +62,11 @@ def make_status_distribution_figure(
             text=[f"{v:.0f}±{e:.0f}%" for v, e in zip(values, errors, strict=False)],
             textposition="outside",
             cliponaxis=False,
-            hovertemplate="%{x}: %{y:.1f}% ± %{error_y.array:.1f}<extra></extra>",
+            hovertemplate="%{x}: %{y:.1f}% (SE ±%{error_y.array:.1f})<extra></extra>",
         )
     )
     fig.update_layout(
-        title={"text": f"Claim-status distribution · mean±std over N={n} verifier runs",
+        title={"text": f"Claim-status distribution · N={n} generation draws (FULL) · ±SE",
                "font": {"size": 11}},
         plot_bgcolor=theme.PANEL_ALT,
         paper_bgcolor=theme.PANEL,

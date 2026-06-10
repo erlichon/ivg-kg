@@ -69,6 +69,24 @@ P_POB = ("P19", "place of birth")
 P_COUNTRY = ("P17", "country")
 P_NOTABLE = ("P800", "notable work")
 
+# Fact SLOTS (head + canonical relation; SPEC-text §4.8). The diagnostics are
+# anchored on these; a claim_key is slot_key + "|" + normalized_value (the VARIANT).
+SLOT_FATHER = f"{FCHOPIN}|P22"  # Chopin -> father
+SLOT_FPOB = f"{NCHOPIN}|P19"  # father -> place of birth
+SLOT_FDOB = f"{NCHOPIN}|P569"  # father -> date of birth  (the multi-variant slot)
+SLOT_FCOUNTRY = f"{NCHOPIN}|P19+P17"  # father -> born in <country> (multi-hop)
+SLOT_CPOB = f"{FCHOPIN}|P19"  # Chopin -> own place of birth (the spurious France)
+SLOT_NOTABLE = f"{FCHOPIN}|P800"  # Chopin -> notable work
+
+# Normalized values for the FALSE variants the generator hallucinates (mock,
+# opaque value tokens; they never enter the reference KG).
+VAL_DOB_TRUE = "1771-04-15"  # the reference-correct birth date variant
+VAL_DOB_FALSE = "1771-06-17"  # the displayed wrong-value variant
+_FALSE_FATHER = "Q-false-father"
+_FALSE_FPOB = "Q-false-fpob"
+_FALSE_COUNTRY = "Q-false-country"
+_FALSE_NOTABLE = "lit:false-notable"
+
 # Per-modality classifier error for the Trust strip (SPEC-text §4.7).
 ERROR_RATES: dict[str, float] = {"text-nli": 0.06, "structure-path": 0.09}
 
@@ -172,7 +190,7 @@ def canonical_claims() -> list[ClaimRecord]:
             claim_id="c1",
             text="Frédéric Chopin's father was Nicolas Chopin",
             status=ClaimStatus.RETRIEVED, support_source=SupportSource.DIRECT_TRIPLE,
-            claim_key=f"{FCHOPIN}|P22|{NCHOPIN}",
+            slot_key=SLOT_FATHER, claim_key=f"{SLOT_FATHER}|{NCHOPIN}",
             linked_entities=[_ent(FCHOPIN), _ent(NCHOPIN)],
             grounding_path=empty_path, entailment_score=0.97,
         ),
@@ -181,7 +199,7 @@ def canonical_claims() -> list[ClaimRecord]:
             claim_id="c2",
             text="Nicolas Chopin was born in Marainville-sur-Madon",
             status=ClaimStatus.RETRIEVED, support_source=SupportSource.DIRECT_TRIPLE,
-            claim_key=f"{NCHOPIN}|P19|{MARAIN}",
+            slot_key=SLOT_FPOB, claim_key=f"{SLOT_FPOB}|{MARAIN}",
             linked_entities=[_ent(NCHOPIN), _ent(MARAIN)],
             grounding_path=empty_path, entailment_score=0.95,
         ),
@@ -190,7 +208,7 @@ def canonical_claims() -> list[ClaimRecord]:
             claim_id="c3",
             text="Nicolas Chopin was born on 17 June 1771",
             status=ClaimStatus.FABRICATED, support_source=SupportSource.NONE,
-            claim_key=f"{NCHOPIN}|P569|1771-06-17",
+            slot_key=SLOT_FDOB, claim_key=f"{SLOT_FDOB}|{VAL_DOB_FALSE}",
             linked_entities=[_ent(NCHOPIN)],
             grounding_path=empty_path, entailment_score=0.18,
             spurious_path=False,
@@ -200,7 +218,7 @@ def canonical_claims() -> list[ClaimRecord]:
             claim_id="c4",
             text="Chopin's father was born in France",
             status=ClaimStatus.REASONED_SUPPORTABLE, support_source=SupportSource.MULTI_HOP_PATH,
-            claim_key=f"{NCHOPIN}|P19+P17|{FRANCE}",
+            slot_key=SLOT_FCOUNTRY, claim_key=f"{SLOT_FCOUNTRY}|{FRANCE}",
             linked_entities=[_ent(NCHOPIN), _ent(FRANCE)],
             grounding_path=GroundingPath(
                 edges=[
@@ -217,7 +235,7 @@ def canonical_claims() -> list[ClaimRecord]:
             claim_id="c5",
             text="Frédéric Chopin was born in France",
             status=ClaimStatus.REASONED_SUPPORTABLE, support_source=SupportSource.MULTI_HOP_PATH,
-            claim_key=f"{FCHOPIN}|P19|{FRANCE}",
+            slot_key=SLOT_CPOB, claim_key=f"{SLOT_CPOB}|{FRANCE}",
             linked_entities=[_ent(FCHOPIN), _ent(FRANCE)],
             grounding_path=GroundingPath(
                 edges=[
@@ -240,7 +258,7 @@ def canonical_claims() -> list[ClaimRecord]:
             claim_id="c6",
             text="Chopin is known for his Nocturnes",
             status=ClaimStatus.RETRIEVED, support_source=SupportSource.DIRECT_TRIPLE,
-            claim_key=f"{FCHOPIN}|P800|{NOCT}",
+            slot_key=SLOT_NOTABLE, claim_key=f"{SLOT_NOTABLE}|{NOCT}",
             linked_entities=[_ent(FCHOPIN), _ent(NOCT)],
             grounding_path=empty_path, entailment_score=0.93,
         ),
@@ -259,75 +277,138 @@ CLAIM_SPANS: dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
-# Per-claim per-condition draw distributions (counts over _MAX_DRAWS draws).
-# Story: structural RETRIEVED claims collapse under knowledge-absence but survive
-# content-absence; the fabricated date worsens under knowledge-absence; the genuine
-# path drops when its structure is withheld; the spurious path is unstable.
+# Per-SLOT variant draw model (counts over _MAX_DRAWS GENERATION draws).
+#
+# The verifier is deterministic and grades against the full KG, so a VARIANT (a
+# fixed value for a slot) has ONE fixed status. What varies across the N draws is
+# WHICH variant the generator emits for each slot (or none -> absent). The mock
+# therefore tracks, per slot per condition, how often each variant value (and
+# absent) is drawn. Story: structural slots are answered with the correct value
+# under FULL but, under knowledge-absence, the generator more often emits a
+# WRONG-VALUE variant (fabricated) or omits the slot; the father's birth-DATE
+# slot is genuinely multi-variant even under FULL (the right date AND the
+# displayed wrong date both appear) -- this is where "fabrication = a wrong value
+# in the same slot" is visible. All variance is GENERATION variance (SPEC §4.8).
 # ---------------------------------------------------------------------------
-R = ClaimStatus.RETRIEVED.value
-S = ClaimStatus.REASONED_SUPPORTABLE.value
-F = ClaimStatus.FABRICATED.value
+R = ClaimStatus.RETRIEVED
+S = ClaimStatus.REASONED_SUPPORTABLE
+F = ClaimStatus.FABRICATED
 A = ABSENT
 
-_DRAW_COUNTS: dict[str, dict[str, dict[str, int]]] = {
-    "c1": {  # retrieved father (structural)
-        Condition.FULL.value: {R: 19, S: 1},
-        Condition.KNOWLEDGE_ABSENT.value: {R: 3, F: 12, A: 5},
-        Condition.CONTENT_ABSENT.value: {R: 18, S: 2},
+# Multi-hop supportable paths that the value-sensitive gate passes but that are
+# illegitimate support (SPEC-text §4.8 spurious_path); the displayed c5 shares it.
+_SPURIOUS_SLOTS = {SLOT_CPOB}
+_SPURIOUS_REASON = (
+    "relation/value illegitimacy: the path reaches France via the father's "
+    "place of birth (P22→P19→P17), not the subject's own birthplace (P19) — "
+    "Chopin was born in Żelazowa Wola, Poland."
+)
+
+# slot_key -> list of variants: (normalized_value, fixed status, surface text).
+# The first entry is the variant shown in the displayed answer (canonical_claims).
+_SLOT_VARIANTS: dict[str, list[tuple[str, ClaimStatus, str]]] = {
+    SLOT_FATHER: [
+        (NCHOPIN, R, "Frédéric Chopin's father was Nicolas Chopin"),
+        (_FALSE_FATHER, F, "Frédéric Chopin's father was Marc Chopin"),
+    ],
+    SLOT_FPOB: [
+        (MARAIN, R, "Nicolas Chopin was born in Marainville-sur-Madon"),
+        (_FALSE_FPOB, F, "Nicolas Chopin was born in Nancy"),
+    ],
+    SLOT_FDOB: [
+        (VAL_DOB_TRUE, R, "Nicolas Chopin was born on 15 April 1771"),
+        (VAL_DOB_FALSE, F, "Nicolas Chopin was born on 17 June 1771"),
+    ],
+    SLOT_FCOUNTRY: [
+        (FRANCE, S, "Chopin's father was born in France"),
+        (_FALSE_COUNTRY, F, "Chopin's father was born in Poland"),
+    ],
+    SLOT_CPOB: [
+        (FRANCE, S, "Frédéric Chopin was born in France"),
+        (_FALSE_COUNTRY, F, "Frédéric Chopin was born in Poland"),
+    ],
+    SLOT_NOTABLE: [
+        (NOCT, R, "Chopin is known for his Nocturnes"),
+        (_FALSE_NOTABLE, F, "Chopin is known for his symphonies"),
+    ],
+}
+
+# slot_key -> condition -> {normalized_value | ABSENT: draw count} (each sums to 20).
+_SLOT_DRAW_COUNTS: dict[str, dict[str, dict[str, int]]] = {
+    SLOT_FATHER: {
+        Condition.FULL.value: {NCHOPIN: 18, _FALSE_FATHER: 1, A: 1},
+        Condition.KNOWLEDGE_ABSENT.value: {NCHOPIN: 3, _FALSE_FATHER: 12, A: 5},
+        Condition.CONTENT_ABSENT.value: {NCHOPIN: 18, A: 2},
     },
-    "c2": {  # retrieved place of birth (structural)
-        Condition.FULL.value: {R: 18, S: 2},
-        Condition.KNOWLEDGE_ABSENT.value: {R: 4, F: 10, A: 6},
-        Condition.CONTENT_ABSENT.value: {R: 17, S: 3},
+    SLOT_FPOB: {
+        Condition.FULL.value: {MARAIN: 18, _FALSE_FPOB: 1, A: 1},
+        Condition.KNOWLEDGE_ABSENT.value: {MARAIN: 4, _FALSE_FPOB: 10, A: 6},
+        Condition.CONTENT_ABSENT.value: {MARAIN: 17, A: 3},
     },
-    "c3": {  # fabricated date (value mismatch)
-        Condition.FULL.value: {F: 16, A: 4},
-        Condition.KNOWLEDGE_ABSENT.value: {F: 20},
-        Condition.CONTENT_ABSENT.value: {F: 15, A: 5},
+    SLOT_FDOB: {  # the multi-variant star slot
+        Condition.FULL.value: {VAL_DOB_TRUE: 8, VAL_DOB_FALSE: 7, A: 5},
+        Condition.KNOWLEDGE_ABSENT.value: {VAL_DOB_TRUE: 1, VAL_DOB_FALSE: 16, A: 3},
+        Condition.CONTENT_ABSENT.value: {VAL_DOB_TRUE: 7, VAL_DOB_FALSE: 8, A: 5},
     },
-    "c4": {  # supportable genuine path (father → France)
-        Condition.FULL.value: {S: 16, A: 4},
-        Condition.KNOWLEDGE_ABSENT.value: {S: 4, F: 8, A: 8},
-        Condition.CONTENT_ABSENT.value: {S: 15, A: 5},
+    SLOT_FCOUNTRY: {
+        Condition.FULL.value: {FRANCE: 16, A: 4},
+        Condition.KNOWLEDGE_ABSENT.value: {FRANCE: 4, _FALSE_COUNTRY: 8, A: 8},
+        Condition.CONTENT_ABSENT.value: {FRANCE: 15, A: 5},
     },
-    "c5": {  # supportable spurious path (Chopin → France via father)
-        Condition.FULL.value: {S: 12, F: 8},
-        Condition.KNOWLEDGE_ABSENT.value: {S: 2, F: 14, A: 4},
-        Condition.CONTENT_ABSENT.value: {S: 11, F: 9},
+    SLOT_CPOB: {  # spurious-France supportable; collapses when the father link is withheld
+        Condition.FULL.value: {FRANCE: 12, _FALSE_COUNTRY: 8},
+        Condition.KNOWLEDGE_ABSENT.value: {FRANCE: 2, _FALSE_COUNTRY: 14, A: 4},
+        Condition.CONTENT_ABSENT.value: {FRANCE: 11, _FALSE_COUNTRY: 9},
     },
-    "c6": {  # retrieved notable work (structural)
-        Condition.FULL.value: {R: 18, S: 2},
-        Condition.KNOWLEDGE_ABSENT.value: {R: 3, F: 11, A: 6},
-        Condition.CONTENT_ABSENT.value: {R: 18, S: 2},
+    SLOT_NOTABLE: {
+        Condition.FULL.value: {NOCT: 18, _FALSE_NOTABLE: 1, A: 1},
+        Condition.KNOWLEDGE_ABSENT.value: {NOCT: 3, _FALSE_NOTABLE: 11, A: 6},
+        Condition.CONTENT_ABSENT.value: {NOCT: 18, A: 2},
     },
 }
 
-_SPREAD_ORDER = [R, S, F, A]  # tie-break priority for deterministic interleave
+# Display claim_id (canonical_claims) -> slot_key, for the per-claim card lookup.
+SLOT_BY_CLAIM_ID: dict[str, str] = {
+    "c1": SLOT_FATHER, "c2": SLOT_FPOB, "c3": SLOT_FDOB,
+    "c4": SLOT_FCOUNTRY, "c5": SLOT_CPOB, "c6": SLOT_NOTABLE,
+}
+
+# Per-slot status + text lookup for a drawn variant value.
+_VARIANT_INFO: dict[str, dict[str, tuple[ClaimStatus, str]]] = {
+    slot: {value: (status, text) for value, status, text in variants}
+    for slot, variants in _SLOT_VARIANTS.items()
+}
 
 
-def _spread(counts: dict[str, int]) -> list[str]:
+def _spread(counts: dict[str, int], order: list[str]) -> list[str]:
     """Deterministically spread `counts` into a length-sum(counts) sequence.
 
-    Lowest placed/target ratio wins each slot (ties by _SPREAD_ORDER), so a
-    minority status is distributed across the sequence — making N-prefixes of
+    Lowest placed/target ratio wins each slot (ties broken by `order`), so a
+    minority value is distributed across the sequence — making N-prefixes of
     5/10/20 give meaningfully different fractions (the N-selector does something).
-    The highest-priority present status lands at index 0 (= the canonical
-    FULL draw-#0 status).
+    The first declared value lands at index 0.
     """
     placed = dict.fromkeys(counts, 0)
+
+    def _rank(k: str) -> int:
+        return order.index(k) if k in order else len(order)
+
     seq: list[str] = []
     for _ in range(sum(counts.values())):
-        best = min(
-            counts,
-            key=lambda k: (placed[k] / counts[k], _SPREAD_ORDER.index(k)),
-        )
+        best = min(counts, key=lambda k: (placed[k] / counts[k], _rank(k)))
         seq.append(best)
         placed[best] += 1
     return seq
 
 
-def _draw_vectors(condition: str) -> dict[str, list[str]]:
-    return {cid: _spread(_DRAW_COUNTS[cid][condition]) for cid in _DRAW_COUNTS}
+def _slot_value_vectors(condition: str) -> dict[str, list[str]]:
+    """slot_key -> per-draw drawn value (or ABSENT) under one condition."""
+    vectors: dict[str, list[str]] = {}
+    for slot, by_cond in _SLOT_DRAW_COUNTS.items():
+        # Tie-break order: declared variant values first, then ABSENT.
+        order = [v for v, _, _ in _SLOT_VARIANTS[slot]] + [A]
+        vectors[slot] = _spread(by_cond[condition], order)
+    return vectors
 
 
 def mock_grounding_run() -> GroundingRun:
@@ -340,27 +421,50 @@ def mock_grounding_run() -> GroundingRun:
     )
 
 
-def build_runset(n: int = _MAX_DRAWS) -> list[GroundingRun]:
-    """Materialize the RunSet: n draws under each of {full, knowledge-, content-absent}.
+def _support_for(status: ClaimStatus) -> SupportSource:
+    if status == ClaimStatus.REASONED_SUPPORTABLE:
+        return SupportSource.MULTI_HOP_PATH
+    if status == ClaimStatus.RETRIEVED:
+        return SupportSource.DIRECT_TRIPLE
+    return SupportSource.NONE
 
-    Draw j clones the canonical claims, overriding each claim's status with its
-    j-th drawn status under that condition; a drawn status of ABSENT omits the
-    claim from that draw. Deterministic; n is clamped to [1, 20].
+
+def build_runset(n: int = _MAX_DRAWS) -> list[GroundingRun]:
+    """Materialize the RunSet: n GENERATION draws under each condition.
+
+    For each condition, draw j fills each SLOT with whichever variant the
+    generator emitted on that draw (or omits the slot when the drawn value is
+    ABSENT). Each emitted claim carries the variant's FIXED status, its slot_key,
+    and a claim_key of slot_key + "|" + value. Grading is deterministic against
+    the full KG, so a variant's status never changes across draws/conditions; only
+    which variant appears does. Deterministic; n is clamped to [1, 20].
     """
     n = max(1, min(n, _MAX_DRAWS))
     conditions = [
         Condition.FULL, Condition.KNOWLEDGE_ABSENT, Condition.CONTENT_ABSENT,
     ]
+    empty_path = GroundingPath(edges=[], node_ids=[])
     runs: list[GroundingRun] = []
     for cond in conditions:
-        vectors = _draw_vectors(cond.value)
+        vectors = _slot_value_vectors(cond.value)
         for j in range(n):
             draw_claims: list[ClaimRecord] = []
-            for canonical in canonical_claims():
-                drawn = vectors[canonical.claim_id][j]
-                if drawn == ABSENT:
+            for slot, values in vectors.items():
+                value = values[j]
+                if value == A:
                     continue
-                draw_claims.append(canonical.model_copy(update={"status": ClaimStatus(drawn)}))
+                status, text = _VARIANT_INFO[slot][value]
+                spurious = slot in _SPURIOUS_SLOTS and status == ClaimStatus.REASONED_SUPPORTABLE
+                draw_claims.append(
+                    ClaimRecord(
+                        claim_id=f"{slot}|{value}", text=text, status=status,
+                        support_source=_support_for(status),
+                        slot_key=slot, claim_key=f"{slot}|{value}",
+                        linked_entities=[], grounding_path=empty_path,
+                        spurious_path=spurious,
+                        spurious_reason=_SPURIOUS_REASON if spurious else None,
+                    )
+                )
             runs.append(
                 GroundingRun(
                     run_id=f"chopin-{cond.value}-{j}", question=QUESTION,
