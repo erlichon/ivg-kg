@@ -30,10 +30,11 @@ MONO = "'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', 'Roboto Mono', monospa
 
 # --- the load-bearing status palette (hue == status) -------------------------
 # Keyed by ClaimStatus *value* strings so every panel imports the same map.
+# Pastel 3-grade palette (light on the dark ground; chip text uses BG for contrast).
 STATUS_COLORS: dict[str, str] = {
-    ClaimStatus.RETRIEVED.value: "#3fb950",            # green
-    ClaimStatus.REASONED_SUPPORTABLE.value: "#d29922",  # amber / gold
-    ClaimStatus.FABRICATED.value: "#f7508d",           # magenta / red
+    ClaimStatus.RETRIEVED.value: "#8fd9a8",            # pastel green
+    ClaimStatus.REASONED_SUPPORTABLE.value: "#f2d08a",  # pastel amber / gold
+    ClaimStatus.FABRICATED.value: "#f4a6c0",           # pastel rose / magenta
 }
 
 # Short UI labels (the long term stays in the enum / prose).
@@ -46,7 +47,7 @@ STATUS_UI_LABELS: dict[str, str] = {
 # Fourth segment for per-condition stacked bars: a claim not emitted by a draw
 # (distinct from fabricated). Grey — not a status hue.
 ABSENT = "absent"
-ABSENT_COLOR = "#6e7681"
+ABSENT_COLOR = "#9aa3ad"  # pastel grey
 
 # Ordered grades for filters / charts (the THREE real grades; "proposed" is the
 # input universe, not a fourth grade).
@@ -89,7 +90,7 @@ def info_icon(explanation: str) -> html.Details:
             html.Div(
                 explanation,
                 style={
-                    "marginTop": "4px", "maxWidth": "300px", "whiteSpace": "normal",
+                    "marginTop": "4px", "maxWidth": "320px", "whiteSpace": "pre-wrap",
                     "background": "#0b1020", "border": f"1px solid {ACCENT}",
                     "borderRadius": "6px", "padding": "8px 10px",
                     "color": TEXT, "fontSize": "0.74em", "lineHeight": "1.45",

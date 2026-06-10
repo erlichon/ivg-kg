@@ -35,18 +35,19 @@ per-modality classifier-error strip in Analytics.
 3. **1st-degree neighbourhood under a node cap.** The subgraph shows each claim node plus
    its immediate neighbours (de-emphasised); neighbour expansion is skipped above
    `config.SUBGRAPH_NODE_CAP` (40). The Chopin graph is small, so all 6 nodes show.
-4. **Click a claim → per-claim analytics.** Clicking a claim renders its diagnostics in
-   the bottom-right (the focused claim = the most recently selected).
-   → `screenshots/02-fabricated-claim-perclaim.png`
+4. **Click a claim → per-claim analytics.** Each selected claim gets its own collapsible
+   card under PER-CLAIM (closed by default); expand any card for that claim's diagnostics.
+   Selecting several shows several cards. → `screenshots/02-fabricated-claim-perclaim.png`
 5. **Full-answer analytics + N selector.** Top-right: the **claim-status distribution**
-   column chart + the **fabrication rate**, computed over **N generations**. Switch the
-   *generations* selector between **5 / 10 / 20** — the distribution shifts. → `01-overview`
-6. **Per-claim stacked-bar + stability + spurious chip.** For the selected claim: a
+   (mean ± std error bars) + the **fabrication rate**, computed over **N verifier runs**
+   (the answer is generated once; the verifier runs N times — the spread is *verifier*
+   variance). Switch **verifier runs (N) = 5 / 10 / 20** — the distribution shifts. → `01-overview`
+6. **Per-claim stacked-bar + stability + spurious chip.** Expand a claim's card: a
    **per-condition stacked bar** (full / knowledge-absent / content-absent, stacked by
-   {Retrieved, Supportable, Fabricated, Absent}), the **stability** scalar (e.g.
-   "Fabricated 16/20"), the RQ2 absence-leverage / fabrication-induction readouts, and —
-   on Supportable claims only — a **⚠ "path suspect"** chip + reason. Select the spurious
-   claim *"Frédéric Chopin was born in France"* to see the chip. → `03-multiselect-brush`
+   {Retrieved, Supportable, Fabricated, Absent}), the **stability** scalar, the RQ2
+   absence-leverage / fabrication-induction readouts, and — on Supportable claims only —
+   a **⚠ "path suspect"** chip + reason. Every score has a click-to-open **ⓘ** with its
+   definition + formula. → `02-fabricated-claim-perclaim`
 7. **Tap a subgraph node → zoom + entity-detail.** Tapping a node zooms to it + its
    1st-degree neighbours and opens the **entity-detail pane** (bottom-middle) with a
    static placeholder entity image + label/description. *⟲ reset view* restores the
@@ -81,11 +82,17 @@ Inspection → Repair → Overview**):
   `screenshots/07-repair-loop.png`
 
 ## Reading aids
-- **Mean ± std error bars** on the claim-status distribution: bars are the mean per-draw
-  fraction over the N generations, whiskers are ±1 std across those draws.
-- **ⓘ info indicators** next to every score (fabrication rate, distribution, stability,
-  absence-leverage, fabrication-induction, the spurious chip, the Trust strip) — hover for
-  what it means and how it's computed.
+- **Variance model:** the answer is generated **once**; the **verifier** runs **N** times
+  over its claims. So the distribution / stability / fabrication-rate spread is *verifier*
+  variance (cross-condition contrasts like absence-leverage instead need one generation
+  per condition — noted in their ⓘ).
+- **Mean ± std error bars** on the distribution: bar = mean per-run fraction over the N
+  verifier runs, whisker = ±1 std.
+- **ⓘ info indicators** next to every score — **click** to open a persistent note with the
+  definition + formula (stability spells out H, status, FULL, K; absence-leverage explains
+  it needs a generation per condition; Trust explains the gold-set error measurement).
+- **Pastel 3-grade palette** (hue = status), identical in every panel; selected claims are
+  told apart by an outline + numeric badge, never by hue.
 
 ## Screenshots
 | file | shows |

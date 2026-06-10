@@ -7,10 +7,12 @@ the Analytics panel renders (§4.5 #5/#6): the per-condition status mix (the
 stacked-bar small-multiple), the FULL-condition stability scalar, and the RQ2
 ``absence_leverage`` / ``fabrication_induction`` per modality.
 
-Classification is deterministic given a fixed answer text, so all variance here
-is *generation* variance; *classifier* error is reported separately (Trust strip).
-This is the books-spine aggregation used by the mock and (later) the real
-precompute — it does NOT call any model.
+Variance model (mock): the answer is generated once and the **verifier** runs N
+times over its claims, so the within-condition spread is verifier variance. The
+verifier's systematic *error* is reported separately (Trust strip). Cross-condition
+contrasts (absence-leverage) instead require one generation per condition. This is
+the books-spine aggregation used by the mock and (later) the real precompute — it
+does NOT call any model.
 """
 from __future__ import annotations
 

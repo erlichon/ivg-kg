@@ -55,7 +55,8 @@ def make_status_distribution_figure(
         )
     )
     fig.update_layout(
-        title={"text": f"Claim-status distribution · mean±std over N={n}", "font": {"size": 12}},
+        title={"text": f"Claim-status distribution · mean±std over N={n} verifier runs",
+               "font": {"size": 11}},
         plot_bgcolor=theme.PANEL_ALT,
         paper_bgcolor=theme.PANEL,
         font={"color": theme.TEXT, "family": theme.MONO, "size": 11},

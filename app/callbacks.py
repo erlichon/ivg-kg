@@ -19,7 +19,7 @@ from dash import ALL, Input, Output, State
 from dash.exceptions import PreventUpdate
 
 from app.charts.status_dist import make_status_distribution_figure
-from app.panels.analytics import fab_rate_readout, per_claim_view
+from app.panels.analytics import fab_rate_readout, per_claim_sections
 from app.panels.answer import render_claim_list
 from app.panels.repair import render_repair_body
 from app.panels.subgraph import (
@@ -100,15 +100,17 @@ def register_callbacks(
     )
     def render_per_claim(selected, n):  # noqa: ANN001
         selected = selected or []
-        if not selected:
-            return per_claim_view(None)
-        focused = selected[-1]
-        key = id_to_key.get(focused)
         diag = diagnostics_by_n.get(int(n)) if n is not None else None
-        if diag is None or key is None:
-            return per_claim_view(None)
-        cd = next((c for c in diag.claim_diagnostics if c.claim_key == key), None)
-        return per_claim_view(cd)
+        if not selected or diag is None:
+            return per_claim_sections([])
+        by_key = {c.claim_key: c for c in diag.claim_diagnostics}
+        # one card per selected claim, in selection order (all closed by default)
+        diags = [
+            by_key[id_to_key[cid]]
+            for cid in selected
+            if cid in id_to_key and id_to_key.get(cid) in by_key
+        ]
+        return per_claim_sections(diags)
 
     # ---- E: N -> full-answer distribution + fabrication rate ----------------
     @app.callback(

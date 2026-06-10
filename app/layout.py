@@ -124,9 +124,11 @@ def _settings_panel() -> html.Div:
                     html.Span("generation settings", style={"color": theme.TEXT,
                                                             "fontWeight": "bold"}),
                     theme.info_icon(
-                        "Controls for the live N-generation path (per condition, N draws). "
-                        "Mock & presentational here: the on-stage demo and reported figures "
-                        "run off precomputed offline run-sets (SPEC-text §4.6 / §10)."
+                        "Parameters for the single answer generation (one answer per "
+                        "condition). The verifier then runs N times over that answer to "
+                        "estimate grading variance (N is set in Analytics). Mock & "
+                        "presentational here; reported figures run off precomputed offline "
+                        "run-sets (SPEC-text §4.6 / §10)."
                     ),
                 ],
                 style={"marginBottom": "8px", "fontSize": "0.85em"},
@@ -164,8 +166,9 @@ def _settings_panel() -> html.Div:
                        "flexWrap": "wrap"},
             ),
             html.Div(
-                "Mock: parameters are presentational; the displayed answer is FULL draw #0 "
-                "of a precomputed, offline run-set. N (draws/condition) is set in Analytics.",
+                "Mock: parameters are presentational. The answer is generated once "
+                "(full context); the verifier then runs N times over its claims — N is "
+                "set in Analytics. Reported figures come from precomputed offline run-sets.",
                 style={"color": theme.FAINT, "fontSize": "0.72em", "marginTop": "10px"},
             ),
         ],
