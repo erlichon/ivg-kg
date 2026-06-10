@@ -60,8 +60,9 @@ Not applied uniformly — that would review scaffold as hard as the entailment g
 - **Tier 1 — full adversarial loop (≤4 rounds):** **S2** (schema), **DA4** (grading reference),
   **PT1** (withhold semantics), **GR3** (the only place ablation happens), **GR7** (value-sensitive
   entailment), **GR8** (classifier), **GR9** (grade-against-reference wiring), **GR10**, **TS1**,
-  **TS2**, **EX3** (deterministic repair-leverage), **EX5** (diagnostics: stability / absence-leverage
-  / spurious-path semantics), **EX4** (the §6 controls must *pass*).
+  **TS2**, **EX3** (repair-leverage = flip count on restore + re-run), **EX5** (two-mode diagnostics:
+  single-run status %, multi-run status mean+/-SE, support-frequency semantics), **EX4** (the §6
+  controls must *pass*).
 - **Tier 2 — single Opus review, fix-and-confirm if must-fix:** DA1, DA2, DA3, GR1, GR4, GR5, GR6,
   GR11, UI2, UI3, EX1, EX2.
 - **Tier 3 — light single pass (Invariants + acceptance):** S1, UI1, UI4 charts, UI5.
@@ -94,8 +95,9 @@ Non-obvious load-bearing decisions a cold agent will otherwise violate (from `SP
 7. **Books-first hard gate.** Do **not** create, scaffold, or import any image-axis code or open the
    image task files (`TASKS-image-artwork.md`, `TASKS-image-taxa.md`) until **M-BOOKS** is validated.
 8. **Demo-safety & determinism.** Live SPARQL is build-time only (cached, deterministic order,
-   QLever fallback). Answers/claims/groundings precomputed + cached by input hash; only the repair
-   loop makes a live call. Repair-leverage primary metric is **deterministic**.
+   QLever fallback). Answers/claims/groundings precomputed + cached by input hash; live calls are the
+   repair loop (edit-the-KG + re-run) and opt-in live multi-run. **Verification (the gate) is
+   deterministic given a fixed answer text**; reported figures come from frozen scenarios.
 9. **Schema discipline.** Pydantic v2, JSON-serializable (`dcc.Store`); NetworkX **rebuilt from
    JSON** (no pickle). `active_perturbations` is a **list**. `unresolved_entities` distinct from
    `FABRICATED`. Manifest fixed before inspection. The schema is **multimodal-ready** (image fields
@@ -109,13 +111,39 @@ Non-obvious load-bearing decisions a cold agent will otherwise violate (from `SP
     (Retrieved / Supportable / Fabricated; long term `reasoned-supportable`) used identically in every
     panel. Multiple selected claims are distinguished by **outline + numeric badge, never by hue**.
     The status filter is over the **three grades**; "proposed" is the input universe, not a fourth grade.
-13. **Two leverage metrics, never conflated (SPEC-text §4.6/§4.8).** `repair_leverage` =
-    deterministic count of claims flipping FABRICATED→grounded when a restored item is *added back*
-    (RQ3, EX3). `absence_leverage` = probabilistic per-claim P(grounded|FULL)−P(grounded|absent_m)
-    over N draws when a modality is *withheld* (RQ2, EX5). Diagnostics align claims across the RunSet
-    by **`claim_key`**; a claim absent from a draw is status **`absent`** (≠ `fabricated`).
-    Classification is **deterministic given a fixed answer text**; **reported figures come from frozen
-    scenarios**, live N-generation is opt-in and never the source of reported numbers.
+13. **Two modes; claims NOT aligned across runs (SPEC-text §4.5/§4.8).** **Single-run** = one
+    answer's status %/counts, **no SE** (one sample), + per-claim support-path highlight + per-claim
+    status. **Multi-run** (N=20 default, N selectable) = (a) status **mean +/- SE** of the
+    **answer-level per-run fraction** (computed per run, then mean+SE across runs); (b)
+    **support-frequency** per KG node/triplet = fraction of N runs the item was **used** (lies on the
+    support path of >=1 grounded claim) — **observational, NOT causal**. **Claims are NOT aligned
+    across runs; only stable KG-item IDs are** — that is why this design is simpler. `repair_leverage`
+    (RQ3, EX3) = **count** of claims flipping FABRICATED→grounded on restore (edit-the-KG) + **re-run**,
+    aligned by `claim_id` **within one answer's before/after** (regeneration-based, not deterministic
+    re-grounding). Classification is **deterministic given a fixed answer text**; **reported figures
+    come from frozen scenarios**, live multi-run is opt-in and never the source of reported numbers.
+14. **Generator vs verifier roles (SPEC-text §4.3).** The **generator is stochastic & seeded**
+    (sampled, temp ~0.7, `seed=f(question_id,condition,sample_index)`, N runs/condition); the
+    **verifier is deterministic & a DIFFERENT model family** (no self-verification — correlated blind
+    spots otherwise). Every verifier-side LLM stage (extraction) is **pinned greedy (temp 0)**;
+    persist the **raw `entailment_score`** (margin to `tau` = confidence); float32 + fixed batch order
+    on MPS. **Never describe per-run variance as "verifier runs"** — all per-run variance is
+    *generation* variance. Verifier choice is **accuracy-first**: **DeBERTa-v3-large on the LIVE path**
+    (the live path DOES verify live), **MiniCheck-7B for offline precompute/calibration**; **cache
+    verification by distinct evidence-pair**.
+15. **Two perturbation layers, distinct grading (SPEC-text §4.4/§4.8).** **Withhold-from-context**
+    (RQ2) hides evidence from the **generation context only** and **grades vs the FULL reference** —
+    result is the **distribution shift** across {full, content-withheld, knowledge-withheld}, NOT a
+    leverage scalar. **Edit-the-KG** (repair / free exploration) **changes the reference** (ground
+    truth) and **grades vs the current (edited)** reference. Both grade vs the *current* reference; the
+    difference is whether the edit touched the reference. There is **no `absence_leverage` /
+    `fabrication_induction` scalar** and **no per-claim stability / slot / variant machinery** — these
+    are dropped. Multi-run proportions carry `SE=sqrt(p(1-p)/N)` (not the ~0.5 Bernoulli std); **N=20
+    is a floor**.
+16. **Support-frequency is observational, not causal (SPEC-text §4.8).** `support_frequency[id]` =
+    fraction of N runs a KG node/triplet was **used** (lies on the support path of >=1 grounded
+    claim). It measures "how often grounding routes through this item", **NOT** causal leverage.
+    Never describe it as a causal/leverage metric.
 
 ### Brief templates
 **Implementer (Sonnet 4.6):** paste the task entry + the exact SPEC-text excerpts it cites +
@@ -158,15 +186,19 @@ image axis is curtailed (artwork→taxa→drop) to protect the demo + write-up.
 ### SCAFFOLD
 - **S1 — Repo scaffold & tooling** · P0 · deps: — (root)
   *Delivers:* `pyproject.toml` (uv, py≥3.11, deps pinned by track), repo layout (SPEC-text §3.3),
-  `.gitignore`, `ruff`+`pytest` config, `config.py` (band, k, tau, model ids, WDQS/QLever
-  endpoints), CI lint+tests. *SPEC:* §3.3, §7, §9(P0-a).
+  `.gitignore`, `ruff`+`pytest` config, `config.py` (band, k, tau, model ids — separate generator vs
+  verifier model ids, the verifier a **different family**; **verifier is accuracy-first: DeBERTa-v3-large
+  live / MiniCheck-7B offline** — WDQS/QLever endpoints), CI lint+tests.
+  *SPEC:* §3.3, §7, §9(P0-a).
 - **S2 — Typed schema `schema.py`** · P0 · deps: S1
   *Delivers:* all pydantic v2 contracts in SPEC-text §4.2 — **the full multimodal-ready schema**
   (enums incl. Modality/SupportSource/**Condition**, KG shape incl. `image_path`, `GradingReference`,
-  `GenerationContext`, `GroundingConfig`, per-claim log with **`claim_key` + `spurious_reason`**,
-  `GroundingRun` with **`condition`/`sample_index`**, and the **`ClaimDiagnostics`/`AnswerDiagnostics`**
-  aggregates); JSON round-trip test. Image/diagnostics fields exist but the diagnostics aggregates are
-  populated in P2 (EX5); the text build leaves image fields unexercised. **Central contract.**
+  `GenerationContext`, `GroundingConfig`, per-claim log with **`spurious_reason`** (within-run
+  `claim_id`; **no slot_key/claim_key**), `GroundingRun` with **`condition`/`sample_index`**, and the
+  two-mode diagnostics **`SingleRunStatusSummary` / `StatusMeanSE` / `AnswerDiagnostics`** +
+  **`RepairResult`**); JSON round-trip test. Image/diagnostics fields exist but the diagnostics
+  aggregates are populated in P2 (EX5); the text build leaves image fields unexercised. **Central
+  contract.**
   *SPEC:* §4.2, §4.8.
 
 ### DATA (books)
@@ -206,20 +238,24 @@ image axis is curtailed (artwork→taxa→drop) to protect the demo + write-up.
   *SPEC:* §4.5, §3.1(seam 3).
 - **UI3 — Wire app to precomputed runs** · P1 · deps: UI2, GR11
   *Delivers:* app loads `data/runs/*.json`; question/condition selector. *SPEC:* §8, §4.5.
-- **UI4 — Analytics panel (full) + per-claim diagnostics + Trust indicator** · P2 · deps: UI3, EX4, EX3, EX5
-  *Delivers:* `app/charts/{status_dist,repair_history,coverage,claim_diagnostics}.py` (one
-  `make_*_figure()` each). **Full-answer (#5):** claim-status **distribution column chart** +
-  **fabrication rate** over **N generations** with an **N selector**; modality-coverage;
-  repair-history + **repair-leverage**. **Per-claim (#4/#6, on claim click):** the **per-condition
-  stacked-bar small-multiple** from `ClaimDiagnostics.status_by_condition`, the **stability** scalar
-  ("retrieved 9/10"), and the **`spurious_path` warning chip + reason** (Supportable claims only).
-  **Trust-pillar indicator** rendering `GroundingRun.error_rates` (per-modality classifier error,
-  always visible). Bars start at y=0; node sizing by area. *SPEC:* §4.5, §4.6, §4.7, §4.8.
-- **UI5 — Repair-loop UI (CB4) + live N-generation** · P2 · deps: UI3, EX3
-  *Delivers:* spot-fabricated→restore-evidence→regenerate→diff (the repair live call); **plus the
-  optional live N-generation path for a new question** (bulk N×conditions, display FULL draw #0,
-  aggregate to diagnostics) — gated behind a control, with a "minutes" cost notice; the canned demo
-  uses frozen scenarios. *SPEC:* §4.5, §4.6.
+- **UI4 — Analytics panel (two modes) + Trust indicator** · P2 · deps: UI3, EX4, EX3, EX5
+  *Delivers:* `app/charts/{status_dist,repair_history,coverage,support_frequency}.py` (one
+  `make_*_figure()` each), with a **single-run / multi-run mode toggle**. **Single-run:** the one
+  run's **status %/counts** (no SE) + per-claim support-path highlight + per-claim status.
+  **Multi-run (#5, N selectable, default 20):** the **status distribution as mean +/- SE** column
+  chart (answer-level per-run fractions) + **support-frequency** rendered as **node-size/edge-weight**
+  on the subgraph (observational, NOT causal); modality-coverage; repair-history + the
+  **repair-leverage count**. **Trust-pillar indicator** rendering `GroundingRun.error_rates`
+  (per-modality classifier error, always visible) with the caption **"calibrated on the curated QA
+  set"**; a **borderline-margin chip near `tau`** (from the persisted `entailment_score`).
+  **Prominent small-N caveat** (SE of a proportion; N=20 a floor). Bars start at y=0; node sizing by
+  area. **Drop slot-anchored card / variant list / stability / per-condition stacked-bar.**
+  *SPEC:* §4.5, §4.6, §4.7, §4.8.
+- **UI5 — Repair-loop UI (CB4) + live multi-run** · P2 · deps: UI3, EX3
+  *Delivers:* spot-fabricated→restore-evidence (edit-the-KG)→re-run→diff (the repair live call); **plus
+  the optional live multi-run path for a new question** (N runs, aggregate to the multi-run
+  diagnostics) — gated behind a control, with a "minutes" cost notice; the canned demo uses frozen
+  scenarios. *SPEC:* §4.5, §4.6.
 
 ### GROUND (text/structure)
 - **GR1 — LLM client abstraction `clients/`** · P1 · deps: S2
@@ -233,33 +269,49 @@ image axis is curtailed (artwork→taxa→drop) to protect the demo + write-up.
   *Delivers:* `generate_answer(question, context, client)` + cache by `hash(question, context)`.
   *SPEC:* §4.3.
 - **GR5 — Claim extraction `extract.py`** · P1 · deps: GR1
-  *Delivers:* RefChecker `LLMExtractor` (offline) → atomic claims/triplets; vendored KGR/VeGraph
-  prompt fallback; cached. *SPEC:* §4.3(A).
+  *Delivers:* RefChecker `LLMExtractor` (offline) → **pinned-greedy (temp 0) STRUCTURED `(h,r,t)`
+  triplets** (not free text — it is a verifier-side stage); vendored KGR/VeGraph prompt fallback;
+  cached. *SPEC:* §4.3(A).
 - **GR6 — Entity linking `link.py`** · P1 · deps: S2, DA2
   *Delivers:* `BaseEntityLinker`; `LabelAliasIndex` (default, offline) + `ReFinEDLinker` (opt);
   out-of-slice → `unresolved_entities`. *SPEC:* §4.3(B).
+  - *Also:* a **property-alias table + inverse-pair canonicalization** (e.g. father/P22 vs child/P40
+    → one canonical relation) as a **named owned, slice-specific data artifact**, so **stable KG-item
+    IDs (entities, triplets) key identically** regardless of phrasing/direction — this is what lets
+    support-frequency (§4.8) aggregate the same triplet across runs. Aligns KG-item IDs, **not
+    claims** (no cross-run claim alignment).
 - **GR7 — Entailment gate `entailment.py`** · P1 · deps: S2
-  *Delivers:* `BaseEntailmentGate`; **MiniCheck** text gate (premise=evidence, hypothesis=claim;
-  **value-sensitive**). *(The visual probe for the image axis is specced in `SPEC-image-artwork.md`.)*
+  *Delivers:* `BaseEntailmentGate`; text NLI gate (premise=evidence, hypothesis=claim;
+  **value-sensitive**). **Verifier (accuracy-first, finalized): DeBERTa-v3-large on the LIVE path
+  (live path DOES verify live), MiniCheck-7B for offline precompute/calibration; cache by distinct
+  evidence-pair.** *(The visual probe for the image axis is specced in `SPEC-image-artwork.md`.)*
   *SPEC:* §4.3, §4.7.
 - **GR8 — Classifier `classify.py`** · P1 · deps: S2, DA2, GR6, GR7
   *Delivers:* decision order (direct triple → content fact → **undirected** multi-hop path →
   fabricated); `all_simple_paths`, **literal-node exclusion**, **max-entailment** path; sets
-  `status` + `support_source` + **`claim_key`** (canonical head+relation+normalized-value) +
-  **`spurious_path` + `spurious_reason`** via the §4.8 detectors (1) relation/value illegitimacy and
-  (2) hub/length fragility. *SPEC:* §4.3(C), §4.8.
+  `status` + `support_source` (+ within-run `claim_id`); **persists `entailment_score`** (raw score;
+  margin to `tau` = deterministic confidence) + **`spurious_path` + `spurious_reason`** via the §4.8
+  detectors (1) relation/value illegitimacy and (2) hub/length fragility. **No slot_key/claim_key and
+  no cross-run claim alignment** — only stable KG-item IDs are aligned (for support-frequency, §4.8),
+  via the property-alias/inverse table from GR6. *SPEC:* §4.3(C), §4.8.
 - **GR9 — Grounding backend `backend.py` (real)** · P1 · deps: GR3, GR5, GR6, GR8, DA4
   *Delivers:* `ground_response(answer, reference, …)` wiring extract→link→classify into a
   `GroundingRun`, grading against the **reference (never the ablated context)**; replaces the P0
   stub. *SPEC:* §4.3, §3.2.
 - **GR10 — Classifier-error accounting (books paths)** · P1 · deps: GR9, DA4
-  *Delivers:* per-modality error for the **text-NLI** and **structure-path** gates on a held-out
-  books sample; **`tau`/`k` tuned on a disjoint fold**. *(Image/label error is in the image axis.)*
+  *Delivers:* per-modality error for the **text-NLI** and **structure-path** gates on a **curated QA
+  set per slice** (the EX1 question-bank gold subset can double as it, keeping the disjoint-fold
+  rule) **including adversarial wrong-value negatives**; also reports **alignment/linking coverage**
+  (fraction of claims that link to an in-slice KG item and reach the gate; distinct from gate error);
+  **`tau`/`k` frozen after calibration on a disjoint fold, never tuned post-hoc**. *(Image/label error
+  is in the image axis.)*
   *SPEC:* §4.7.
 - **GR11 — Precompute pipeline + runs store** · P1 · deps: GR4, GR9
-  *Delivers:* batch script: (question × {full, manifest entry} × **N draws**) assemble→generate→ground
-  → `data/runs/<run_id>.json` (a **RunSet** per question; `condition`/`sample_index` set); cached by
-  input hash; deterministic given fixed answer texts. *SPEC:* §8, §10, §4.8.
+  *Delivers:* batch script: (question × {full, manifest entry} × **N runs**) assemble→generate→ground
+  → `data/runs/<run_id>.json` (the N runs per question/condition; `condition`/`sample_index` set);
+  records the **generator seeding scheme `seed = f(question_id, condition, sample_index)`**; cached by
+  input hash; **deterministic given the seeds** (generator) and given fixed answer texts (verifier).
+  *SPEC:* §8, §10, §4.8, §4.3.
 
 ### TEST
 - **TS1 — §6 mechanical tests (P0 subset)** · P0 · deps: S2, DA1, PT1
@@ -267,9 +319,9 @@ image axis is curtailed (artwork→taxa→drop) to protect the demo + write-up.
   grade-against-reference invariant scaffold. *SPEC:* §6.
 - **TS2 — Classifier invariant tests + §6 controls wiring** · P1 · deps: GR8, GR9
   *Delivers:* undirected-path regression (`book→author←book`), spurious-shared-literal rejection,
-  value-sensitive **false-claim rejection**, deterministic-leverage identity, **grade-against-
-  reference invariant (full, vs the real backend)**; control harness callable from the precompute.
-  *SPEC:* §6.
+  value-sensitive **false-claim rejection**, **grade-against-reference invariant (full, vs the real
+  backend)**; control harness callable from the precompute. **Invariant:** **"same answer text =>
+  bit-identical `claims` list (the grading output), excluding metadata fields run_id/condition/sample_index"** (verifier determinism). *SPEC:* §6, §4.8.
 
 ### EXP (books experiment)
 - **EX1 — Question bank (books) · Phase A** · P2 · deps: DA3
@@ -279,17 +331,21 @@ image axis is curtailed (artwork→taxa→drop) to protect the demo + write-up.
   *Delivers:* fixed `manifest.json` — text-content-absence + knowledge-absence; fixed before
   inspection. *SPEC:* §4.4, §5.1.
 - **EX3 — Repair loop + repair-leverage `RepairSession`** · P2 · deps: GR9, GR3
-  *Delivers:* restore withheld evidence → re-ground; **deterministic `repair_leverage`**
-  (fabricated→grounded per atomic restore, aligned by `claim_id`); live-regen secondary (temp 0, N
-  runs ±CI). **Distinct from EX5 `absence_leverage`** (add-back-count vs withhold-drop — §4.6).
-  *SPEC:* §4.6.
+  *Delivers:* the **edit-the-KG** layer — restore the missing evidence to the KG/reference, **re-run**
+  (regenerate), grade against the **current (edited)** reference. **`repair_leverage` = COUNT** of
+  claims that flip FABRICATED→grounded on restore + re-run (`RepairResult.repair_leverage`), aligned
+  by `claim_id` **within that one answer's before/after** (regeneration-based; the gap-repair flow:
+  true claim fabricated due to KG gap → add triplet → re-run → grounded). *SPEC:* §4.6.
 - **EX5 — Diagnostics aggregation `diagnostics.py`** · P2 · deps: GR11
-  *Delivers:* aggregate a RunSet (N draws × conditions) into `ClaimDiagnostics`/`AnswerDiagnostics`
-  (§4.8): group by **`claim_key`** (absent-claim ⇒ status `absent`, ≠ fabricated); compute
-  **stability** (FULL-condition status entropy + modal fraction), **`status_by_condition`** (the
-  stacked-bar small-multiple), **`absence_leverage`** and **`fabrication_induction`** per modality,
-  and carry the per-claim **`spurious_path`/reason**; full-answer **status distribution +
-  fabrication rate** over the N FULL draws. *SPEC:* §4.8.
+  *Delivers:* the two-mode diagnostics (§4.8). **Single-run:** `SingleRunStatusSummary` — one run's
+  status counts/percentages, **no SE**. **Multi-run (N runs):** `AnswerDiagnostics` —
+  **answer-level status mean +/- SE** (per-run fraction of claims that are
+  retrieved/reasoned-supportable/fabricated, computed per run, then mean+SE across the N runs) +
+  **support-frequency** (per KG node/triplet = fraction of N runs the item was **used** = lies on the
+  support path of >=1 grounded claim; **observational, NOT causal**, aligned by stable KG-item ID).
+  **Claims are NOT aligned across runs.** Report **SE/CI of the proportion** (`SE=sqrt(p(1-p)/N)`)
+  with a **prominent small-N caveat** (N=20 is a floor). **Drop slot/variant, leverage/induction
+  scalars, per-claim stability.** *SPEC:* §4.8.
 - **EX4 — Phase A BOOKS runs + controls + pilot (= M-BOOKS)** · P2 · deps: GR11, GR10, TS2, EX1, EX2
   *Delivers:* run precompute over books bank×manifests; **negative / false-claim / manipulation /
   modality-strength controls** on real data; empirical pilot (~10 q); per-slice claim-status

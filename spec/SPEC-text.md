@@ -99,7 +99,7 @@ ivg-kg/
                  classify.py  entailment.py  backend.py                   # clients/vlm.py: image spec
     mock/fixtures.py
   app/   app.py  layout.py  callbacks.py  panels/{answer,subgraph,analytics}.py
-         charts/{status_dist,repair_history,coverage}.py
+         charts/{status_dist,repair_history,coverage,support_frequency}.py
   tests/
 ```
 
@@ -158,34 +158,35 @@ class PathEdge(BaseModel): subject_id; subject_label; property_id; property_labe
                            object_id: str|None; object_label; traversed_forward: bool
 class GroundingPath(BaseModel): edges: list[PathEdge]; node_ids: list[str]
 class ClaimRecord(BaseModel):
-    claim_id; text; status: ClaimStatus; support_source: SupportSource
-    claim_key: str|None                # canonical entity+relation+value key — aligns "the same claim" across runs (§4.8)
+    claim_id; text; status: ClaimStatus; support_source: SupportSource  # claim_id is WITHIN-RUN only; claims are NOT aligned across runs (§4.8)
     linked_entities: list[LinkedEntity]; grounding_path: GroundingPath
-    active_perturbations: list[str] = []; entailment_score: float|None
+    active_perturbations: list[str] = []
+    entailment_score: float|None       # persist the RAW entailment score; margin to tau = a deterministic confidence (§4.3)
     spurious_path: bool = False; spurious_reason: str|None = None       # reason code when spurious_path (§4.8)
     unresolved_entities: list[str] = []
 class GroundingRun(BaseModel):
     run_id; question; answer_text; slice: str; phase: str
-    condition: Condition = Condition.FULL; sample_index: int = 0        # which ablation condition + which of the N draws
+    condition: Condition = Condition.FULL; sample_index: int = 0        # which condition + which of the N runs (multi-run mode); claims NOT aligned across runs (§4.8)
     claims: list[ClaimRecord]; active_perturbations: list[str] = []
     grading_reference_id: str|None; error_rates: dict[str,float] = {}   # per modality path
     def status_counts(self)->dict[str,int]: ...
     def fabrication_rate(self)->float: ...
 
-# ---- Diagnostics aggregated over a RunSet = the N draws × {conditions} for ONE question (§4.8) ----
-class ClaimDiagnostics(BaseModel):     # one canonical claim, aggregated across the RunSet → the per-claim panel
-    claim_key: str; text: str
-    stability: float                   # 1 - H(status | FULL)/log K over the N FULL draws (reproducibility, §4.8)
-    modal_status: ClaimStatus; modal_fraction: float                    # e.g. "retrieved 9/10" (legible companion)
-    status_by_condition: dict[str, dict[str, float]]                    # condition -> {status: fraction over N} (stacked-bar small-multiple)
-    absence_leverage: dict[str, float] = {}                             # modality -> P(grounded|FULL) - P(grounded|absent_m)  (RQ2, §4.8)
-    fabrication_induction: dict[str, float] = {}                        # modality -> P(fabricated|absent_m) - P(fabricated|FULL)
-    spurious_path: bool = False; spurious_reason: str|None = None
-class AnswerDiagnostics(BaseModel):    # the full-answer analytics view (#5)
-    question: str; n_generations: int
-    status_distribution: dict[str,float]   # over the N FULL draws — the column chart
-    fabrication_rate: float                # over the N FULL draws
-    claim_diagnostics: list[ClaimDiagnostics]
+# ---- Diagnostics (§4.8). Claims are NOT aligned across runs; only STABLE KG-ITEM IDs are. ----
+# SINGLE-RUN: per-run status counts/percentages only — NO SE (it is one sample).
+class SingleRunStatusSummary(BaseModel):   # the single-run analytics view
+    status_counts: dict[str, int]          # {status: count} for THIS one run
+    status_percentages: dict[str, float]   # {status: fraction} for THIS one run — no SE
+# MULTI-RUN: answer-level per-run fractions, aggregated to mean+SE across the N runs.
+class StatusMeanSE(BaseModel):
+    mean: float; se: float                 # SE of a PROPORTION: sqrt(p(1-p)/N); §4.8
+class AnswerDiagnostics(BaseModel):        # the multi-run analytics view (#5)
+    question: str; n_runs: int
+    status_distribution: dict[str, StatusMeanSE]   # status -> mean +/- SE of the per-run answer-level fraction over N runs
+    support_frequency: dict[str, float]            # KG-item id (entity_id OR triplet_id, triplet key = "<subject_id>|<property_id>|<object_id>" per §4.8) -> fraction of N runs it was USED to ground a claim (observational, NOT causal); §4.8
+class RepairResult(BaseModel):             # the gap-repair before/after result (§4.6)
+    restored_item: str                     # the triple/content restored to the KG
+    repair_leverage: int                   # count of claims that flipped FABRICATED->grounded on restore + re-run (aligned by claim_id within this one answer's before/after); §4.6
 ```
 > **Taxonomy note (statement §5.5):** `RETRIEVED` = directly grounded in a single evidence item — a
 > triple OR a content fact (description/image); `support_source` records which. This lets content-only
@@ -198,36 +199,85 @@ def ground_response(question: str, answer_text: str, reference: GradingReference
                     *, active_perturbations: list[str], config: GroundingConfig) -> GroundingRun: ...
 ```
 P0: both raise `NotImplementedError`; UI uses `mock/fixtures.py`.
+
+**Generator vs verifier (design principle).** The GENERATOR and the VERIFIER are two different
+systems with opposite goals; do not blur them.
+- **Generator** (system under test): `generate_answer` is **stochastic on purpose** — sampled,
+  temp ~0.7, drawn N times per condition. It is **seeded** for reproducibility:
+  `seed = f(question_id, condition, sample_index)`. All per-draw variance is GENERATION variance.
+- **Verifier** (measurement instrument): `ground_response` and every verifier-side LLM stage are
+  **deterministic on purpose**, and always grade against the **FULL grading reference (full KG)**,
+  never the ablated context. Every verifier-side LLM stage (claim extraction) is **pinned
+  temperature 0 / greedy**. Persist the **raw entailment score** (its margin to `tau` = a
+  deterministic confidence). On MPS, suppress float jitter via **float32 + fixed batch order** so the
+  gate is bit-stable.
+- **No self-verification (hard rule).** The verifier must be a **different model family from the
+  generator** — a verifier sharing the generator's family inherits correlated blind spots and would
+  pass the generator's own hallucinations.
+- **KGR deviation.** KGR uses the LLM itself as the verifier; we **replace that stage with a
+  deterministic entailment gate over symbolically selected evidence**, so that **generation is the
+  only stochastic stage** and classifier error is calibrated separately (§4.7).
+- **Accuracy, not latency (verifier model choice — FINALIZED).** Verification is mostly precompute,
+  so verifier per-pair latency is second-order; prioritize verifier **accuracy**. **Decision:**
+  **DeBERTa-v3-large on the LIVE path** (the live path DOES verify live — confirmed), and
+  **MiniCheck-7B for OFFLINE precompute / calibration**. **Cache verification by distinct
+  evidence-pair** so repeated pairs are not re-run.
+
 - **Context (`context.py`):** build `GenerationContext` from full evidence, then apply active
   `Perturbation.withhold`. The **only** place ablation happens.
 - **Generation (`generate.py`):** `BaseAIClient` ABC; `LocalModelClient` (POC default) + `CloudAIClient`.
   No provider SDK in business logic. Cached by `hash(question, context)`. *(VLM client for image
   generation: `SPEC-image-artwork.md`.)*
-- **A — extraction (`extract.py`):** RefChecker `LLMExtractor` → atomic claims / `(h,r,t)`; vendored
-  KGR/VeGraph fallback; cached.
+- **A — extraction (`extract.py`):** RefChecker `LLMExtractor` → structured **`(h,r,t)` triplets**
+  (not free text); vendored KGR/VeGraph fallback; **pinned greedy (temperature 0)** — it is a
+  verifier-side stage; cached.
 - **B — linking (`link.py`):** `BaseEntityLinker`: `LabelAliasIndex` (default) / `ReFinEDLinker` (opt);
-  out-of-slice → `unresolved_entities`.
+  out-of-slice → `unresolved_entities`. Maintains a **property-alias table + canonical orientation
+  for inverse pairs** (e.g. father/P22 vs child/P40 → one canonical relation) as a **named,
+  slice-specific data artifact** so that **stable KG-item IDs (entities, triplets) are keyed
+  identically** regardless of surface phrasing or relation direction — this is what lets
+  support-frequency (§4.8) aggregate the same triplet across runs. Linking aligns **KG-item IDs**,
+  not claims.
 - **C — classification (`classify.py`):** decision order — (1) direct triple entailing → RETRIEVED/
   DIRECT_TRIPLE; (2) content fact (description / curated label) entailing → RETRIEVED/TEXT_CONTENT
   (IMAGE_CONTENT on the image axis); (3) **undirected** multi-hop path 2..k (`all_simple_paths`,
   **literal nodes excluded as waypoints**, **highest-entailment** path) entailing → REASONED_SUPPORTABLE/
   MULTI_HOP_PATH; (4) else FABRICATED/NONE, `spurious_path=True` if evidence existed but failed entailment.
 - **Entailment gate (`entailment.py`):** `BaseEntailmentGate.entails(premise, hypothesis)`. Text NLI
-  (**MiniCheck**): premise = serialized reference evidence, hypothesis = claim (asymmetric — do not
-  invert). **Value-sensitive**: a claim whose asserted value the evidence contradicts/omits fails →
-  FABRICATED. Tunes `tau`/`k` on a **disjoint fold**. *(Image-content claims grade by text NLI
+  (**DeBERTa-v3-large live / MiniCheck-7B offline**, per the verifier-model decision above): premise =
+  serialized reference evidence, hypothesis = claim (asymmetric — do not invert). **Value-sensitive**:
+  a claim whose asserted value the evidence contradicts/omits fails → FABRICATED. Tunes `tau`/`k` on a
+  **disjoint fold**. **Cache by distinct evidence-pair.** *(Image-content claims grade by text NLI
   against the curated label, not the raster; the visual probe constructs/verifies labels — image spec.)*
 Classification always reads the **grading reference**, never the ablated context.
 
 ### 4.4 Perturbation interface (P0)
+**Two perturbation layers, distinct grading semantics (load-bearing).**
+- **(a) Withhold-from-context** (RQ2 absence experiment) — hide content (description) or structural
+  (triplet) evidence from the **generation context only**. The item **STAYS in the grading
+  reference**; classification grades against the **FULL** reference. This is the controlled
+  absence-induced-hallucination manipulation; it is a **multi-run** operation and its result is the
+  **shift in the claim-status distribution** across conditions {full, content-withheld,
+  knowledge-withheld}. There is **no `absence_leverage` / `fabrication_induction` scalar** — report
+  the distribution shift (the report may state the difference of means).
+- **(b) Edit-the-KG** (gap-repair / free exploration) — genuinely **add/remove** a triplet or node
+  content from the KG itself, **changing the ground truth**. Classification then grades against the
+  **CURRENT (edited)** KG. This powers the gap-repair demo (a true claim is fabricated because the KG
+  lacks the triplet → analyst adds it → re-run → claim becomes grounded).
+
+**Withhold-from-context NEVER changes the grading reference; edit-the-KG DELIBERATELY changes it.**
+Both are graded against the current reference; the difference is whether the edit touched the
+reference.
+
 `Perturbation` ABC (`type_name`, `id`, `modality`, `withhold(ctx)->ctx`, `manifest_entry()`,
 `control_spec()`) + registry + `AblationManifest` (serialize/`from_json`, fixed before inspection).
-Classes: `TextContentAbsence(entity_id)`, `KnowledgeAbsence(triples: list[TripleRef])`,
-`ImageContentAbsence(entity_id)` (generic withhold-the-image seam; its *data/grading* is the image
-axis). All withhold from the **generation context**, not the frozen KG. A claim's
-`active_perturbations` lists entries touching its linked entities (composed-manifest attributable;
-caveat: ambiguous if one claim links two entities under different perturbations — fine for Phase-A
-single-axis runs).
+The withhold-from-context classes are: `TextContentAbsence(entity_id)`,
+`KnowledgeAbsence(triples: list[TripleRef])`, `ImageContentAbsence(entity_id)` (generic
+withhold-the-image seam; its *data/grading* is the image axis). All withhold from the **generation
+context**, not the frozen KG. (Edit-the-KG is the §4.6 repair layer — it mutates the KG/reference.)
+A claim's `active_perturbations` lists entries touching its linked entities (composed-manifest
+attributable; caveat: ambiguous if one claim links two entities under different perturbations — fine
+for Phase-A single-axis runs).
 
 ### 4.5 Interface — three panels (P0 skeleton; P2 full)
 dash-cytoscape; Dash 2.x; data/layout/callbacks separation; one `get_*_panel()` / `make_*_figure()`.
@@ -256,81 +306,113 @@ per-modality error strip hosted in Analytics.
   entity image when present (P18 — demo-visual even though not grounding evidence: book covers /
   author portraits; the **multimodal surface** where the image axis later attaches). *(On the image
   axis the pane also shows the slice image + claim→region/visual attribution — image spec.)*
-- **Analytics panel** (Knowledge + Trust) — two stacked surfaces plus the Trust strip:
-  - **(#5) Full-answer analytics:** claim-status **distribution column chart** + **fabrication rate**,
-    computed over **N generations** (N selectable; see §4.6/§4.8); modality coverage; repair history +
-    **repair-leverage** (§4.6).
-  - **(#4/#6) Per-claim analytics (on claim click, bottom-right):** the **per-condition stacked-bar
-    small-multiple** — one bar per condition {full, knowledge-absent, content-absent[, image-absent]}
-    stacked by `{retrieved, supportable, fabricated, absent}` fractions over the N draws (reads off
-    both absence-leverage and fabrication-induction; vanish-case visible as the `absent` segment) —
-    beside the **stability** scalar ("retrieved 9/10") and the **`spurious_path`** warning chip with
-    its reason code (shown only on Supportable claims). Definitions in §4.8.
+- **Analytics panel** (Knowledge + Trust) — operates in **two modes** (a mode toggle), plus the
+  always-visible Trust strip:
+  - **SINGLE-RUN mode** — one generated answer. Shows **that one run's status percentages** (and raw
+    counts) with **NO SE** (it is a single sample), driven by `SingleRunStatusSummary` (§4.2). The
+    per-claim **support-path highlight** ("what this verdict rests on") and per-claim status live with
+    this mode (Answer + Subgraph panels). No N selector here.
+  - **MULTI-RUN mode (#5)** — re-runs the query **N times** (N selectable, **default 20**) and shows:
+    **(a)** the **status distribution as mean +/- SE** of the per-run answer-level fraction of claims
+    that are retrieved / reasoned-supportable / fabricated (`AnswerDiagnostics.status_distribution`,
+    §4.8) as a column chart with error bars; **(b)** **support-frequency** — for each KG node and each
+    triplet, the fraction of the N runs in which it was **used** to ground a claim
+    (`AnswerDiagnostics.support_frequency`), visualised as **node-size / edge-weight on the subgraph**.
+    Support-frequency is **observational importance**, explicitly **NOT** causal leverage. Plus
+    **modality coverage** and **repair history + the repair-leverage count** (§4.6).
+    **Small-N caveat (prominent):** the error bars are the **SE of a proportion** (`sqrt(p(1-p)/N)`),
+    **not** the ~0.5 Bernoulli per-draw std; **N=20 is a FLOOR, not a target** — the caveat must be
+    prominent in the view and its meaning pinned in the caption.
   - **Trust indicator** — always-visible, rendering `GroundingRun.error_rates` (per-modality
     classifier error — the MMA-model Trust pillar). Bars start at y=0; node sizing by area.
 - **Coordination:** `dcc.Store(selected_claim)` written by Answer-click; Subgraph + Analytics read it
   independently (no circular callbacks); `modified_timestamp` for initial-load reads. The interaction
   set realises the **Overview → Inspection → Repair** state machine (Yi07 operators on the
-  transitions): Overview (#8/#5) → Inspection (#1–#4, #6, #7) → Repair (§4.6 regenerate) → Overview.
+  transitions): Overview (#8/#5) → Inspection (#1–#3, #7, single-run support-path) → Repair (§4.6
+  edit-the-KG + re-run) → Overview.
 - **Controls-from-registry:** iterate `available_perturbations()`/`control_spec()`.
 
 ### 4.6 Repair loop & repair-leverage (P2)
-`RepairSession` re-adds withheld evidence to the **generation context**. **Primary metric
-(deterministic, RQ3):** re-ground a fixed answer; `repair_leverage = |{claims FABRICATED→grounded}|`
-per atomic restored item, aligned by `claim_id`; bit-identical across runs (§6 test). **Secondary
-(illustrative):** live regeneration at temp 0, pinned model, mean±CI over N — the one live call.
+`RepairSession` is the **edit-the-KG** layer (§4.4(b)): the analyst genuinely restores the missing
+evidence to the **KG / grading reference**, then **re-runs** (regenerates). The gap-repair flow: a
+true claim is fabricated because the KG lacks the triplet → analyst adds the triplet → re-run →
+the claim becomes grounded.
 
-> **`repair_leverage` (RQ3, here) ≠ `absence_leverage` (RQ2, §4.8).** Repair-leverage is the
-> deterministic count of claims that flip when a restored item is *added back*; absence-leverage is
-> the probabilistic per-claim drop in P(grounded) when a modality's evidence is *withheld*. Keep them
-> named distinctly — they answer different questions.
+**`repair_leverage` (RQ3) — a COUNT (`RepairResult.repair_leverage`, §4.2):** the number of claims
+that flip **FABRICATED → grounded** when the analyst restores the missing evidence and **re-runs**.
+It is **regeneration-based**, aligned by `claim_id` **within that one answer's before/after** pair.
+This is the gap-repair flow with a count on it; it preserves RQ3, contribution 3, and the CogMG
+differentiation. **It is NOT a deterministic re-grounding leverage** (which was dropped): because
+regeneration rewrites wrong values, the FABRICATED → grounded flips are real.
 
-**Live N-generation (the instrument).** For a question, the tool bulks the prompt to the model
-**N draws under each condition** {full, knowledge-absent, content-absent[, image-absent]}, ablating
-the context per condition, and **displays draw #0 of the FULL condition** as the answer. The N×draws
-populate the §4.8 diagnostics. **N is selectable** in the Analytics panel. This is the interactive
-path; cost ≈ N×|conditions| generations + grounding per question (minutes on a small local model — too
-slow for a *new* question on stage). So the demo also ships a small set of **frozen scenarios**
-(cached run-sets, e.g. the Chopin example) for instant, reproducible presentation and for the
-reported figures; live-gen serves new questions, frozen serves the canned story. *(Demo-safety:
+**N runs (multi-run mode, the instrument).** For a question, the tool re-runs the query **N times**
+(N selectable, default 20) and aggregates the per-run answer-level fractions into the §4.8
+diagnostics (status mean +/- SE; support-frequency over KG-item IDs). The live path verifies live
+(DeBERTa-v3-large; §4.3). Cost is roughly N generations + grounding per question (minutes on a small
+local model — too slow for a *new* question on stage). So the demo also ships a small set of **frozen
+scenarios** (cached run-sets, e.g. the Chopin example) for instant, reproducible presentation and for
+the reported figures; live runs serve new questions, frozen serves the canned story. *(Demo-safety:
 §10.)*
 
 ### 4.7 Classifier-error & label accounting (P1)
-Error rate on a held-out hand-labelled sample, **per modality path** — text-NLI gate and structure
-path search separately → `GroundingRun.error_rates`. Content labels double-labelled / spot-checked
-(IAA reported). `tau`/`k` tuned on a **disjoint fold** from the reported sample. *(Image visual-probe
-error + image-label IAA: image spec.)*
+Error rate on a **curated QA set per slice** (a held-out gold set, **including adversarial
+value-swapped negatives** so an entity-match-only grader is caught), **per modality path** —
+text-NLI gate and structure path search separately → `GroundingRun.error_rates`. This QA set is
+**conceptually separate** from the image-label reference (do not conflate the two). Report
+**alignment/linking COVERAGE** (the fraction of extracted claims that link to an in-slice KG item and
+reach the gate) as a **pipeline metric distinct from the grading-gate error** — coverage measures
+whether claims reach the gate; gate error measures how it grades them. Content labels
+double-labelled / spot-checked (IAA reported). `tau`/`k` are **frozen after calibration on a
+disjoint fold** and **never tuned post-hoc**. *(Image visual-probe error + image-label IAA: image
+spec.)*
 
-### 4.8 Per-claim & answer diagnostics (P2) — exact definitions
-A **RunSet** for a question = the N draws × the active conditions. Diagnostics aggregate it into the
-panel structures of §4.5 (#5/#6). Classification is **deterministic given a fixed answer text**, so
-all variance below is *generation* variance; *classifier* error is reported separately (§4.7, Trust).
+### 4.8 Single-run & multi-run diagnostics (P2) — exact definitions
+Two modes (§4.5). **Claims are NOT aligned across runs.** The design aligns only **stable KG-item IDs**
+(entities, triplets — canonicalized via the §4.3(B) property-alias / inverse-orientation table) for
+support-frequency, and aggregates claims **only as answer-level fractions**. **Not aligning claims
+across runs is WHY this design is simpler** than a per-claim cross-run scheme. Within a single run,
+`claim_id` is the only claim identifier; it does not carry meaning across runs.
 
-- **Claim alignment (`claim_key`).** Draws don't emit identical claims, so each `ClaimRecord` carries
-  a canonical `claim_key = (head_entity_id, relation, normalized_value)` (post-linking; value
-  normalized per `ValueType`). Diagnostics group by `claim_key` across the RunSet. A claim absent from
-  a draw contributes status `absent` for that draw (distinct from `fabricated`).
-- **Stability** (reproducibility under FULL; the confidence companion). Over the N FULL draws with
-  observed statuses fractions `p_s`: `stability = 1 - H(p)/log K`, `H(p) = -Σ p_s log p_s`, `K` =
-  #observed statuses. Also surface the modal status + fraction ("retrieved 9/10") — more legible than
-  the entropy number.
-- **`grounded`** for a draw `:= status ∈ {RETRIEVED, REASONED_SUPPORTABLE}`.
-- **`absence_leverage_m`** (RQ2, per modality `m∈{knowledge,content,image}`):
-  `P[grounded | FULL] - P[grounded | absent_m]` over the N draws of each condition. High ⇒ the model
-  *relied* on that evidence; ~0 ⇒ produced correctly regardless (parametric/redundant) or never.
-- **`fabrication_induction_m`** (the absence-hallucination signal proper):
-  `P[fabricated | absent_m] - P[fabricated | FULL]`. Both read directly off the §4.5 stacked-bar
-  small-multiple; we don't collapse the bar to a single scalar.
+- **Single-run status % (no SE).** For one generated answer, report the **status counts and
+  percentages** over that run's claims (`SingleRunStatusSummary`, §4.2). It is a **single sample** —
+  **no SE/STD**. The per-claim support-path highlight (the support path of each grounded claim,
+  "what this verdict rests on") and per-claim status accompany it.
+- **Multi-run status mean +/- SE (ANSWER-LEVEL).** Re-run the query **N times** (default 20). For
+  each run compute the **answer-level fraction** of claims that are retrieved / reasoned-supportable /
+  fabricated; then report, per status, the **mean and SE across the N runs**
+  (`AnswerDiagnostics.status_distribution: dict[status, StatusMeanSE]`). The fraction is computed
+  per-run first, then aggregated across runs — never pooled.
+- **Support-frequency (observational, NOT causal).** For each KG **node** and each **triplet**,
+  `support_frequency[id]` = the **fraction of the N runs in which that item was USED to ground a
+  claim**. **Definition of "used":** the item **lies on the support path of >= 1 grounded claim in
+  that run** (a direct triple/content item supporting a RETRIEVED claim, or any node/edge on the
+  multi-hop path of a REASONED_SUPPORTABLE claim). This is **observational importance** — "how often
+  grounding routes through this item" — explicitly **NOT** causal leverage. Visualised as **node-size
+  / edge-weight** on the subgraph (§4.5). **Triplet key format.** A triplet KG-item ID is the string
+  `"<subject_id>|<property_id>|<object_id>"` produced by the canonicalization step in `link.py`
+  (§4.3(B)); this is the key under which `support_frequency` aggregates the same triplet across runs.
+- **Repair-leverage (RQ3) — a COUNT, defined in §4.6.** The number of claims that flip FABRICATED →
+  grounded when the analyst restores missing evidence (edit-the-KG) and **re-runs**, aligned by
+  `claim_id` within that one answer's before/after pair (`RepairResult.repair_leverage`). Cross-ref
+  §4.6; this is the **only** place claims are aligned (within a single before/after, not across the N
+  runs).
+- **Two-layer perturbation grading (cross-ref §4.4).** **Withhold-from-context** (RQ2) hides evidence
+  from the generation context only and **grades against the FULL reference**; its result is the
+  multi-run **shift in the claim-status distribution** across {full, content-withheld,
+  knowledge-withheld} — there is **no `absence_leverage` / `fabrication_induction` scalar**.
+  **Edit-the-KG** (repair) changes the reference and **grades against the current (edited)** reference.
+- **Statistical honesty (small-N; prominent).** A proportion `p` over N runs carries uncertainty
+  `SE = sqrt(p(1-p)/N)` — the SE **of the proportion**, NOT the Bernoulli per-draw std (~0.5).
+  **`N=20` is a FLOOR, not a target.** Error bars MUST be the **SE/CI of the proportion** with their
+  meaning pinned in the caption, and the **small-N caveat must be prominent** in the analytics view.
 - **`spurious_path`** (boolean + `spurious_reason`; only on Supportable claims). A multi-hop path
   passed the value-sensitive entailment gate but is **not legitimate support**. Detectors, priority
   order: **(1)** *relation/value illegitimacy* (primary, deterministic) — no path edge predicate is in
   the claim-relation's allowlist, or the path entails the claim's structure but not its asserted value;
   **(2)** *hub/length fragility* — path length ≥ k through a high-degree hub node with NLI margin just
-  above `tau`; **(3)** *route non-robustness* (strongest, reuses the ablation runs) — after removing
+  above `tau`; **(3)** *route non-robustness* (strongest, reuses the edit-the-KG runs) — after removing
   the single most-relevant triple, a *different* path still "entails" the claim ⇒ coincidental
-  connectivity. Primary = (1)+(2); (3) is the cross-check where ablation runs already exist.
-`absence_leverage` is *related to but distinct from* §4.6 `repair_leverage` (withhold-drop vs
-add-back-count) — never conflate.
+  connectivity. Primary = (1)+(2); (3) is the cross-check where edit-the-KG runs already exist.
 
 ---
 
@@ -355,9 +437,9 @@ frozen slice; out-of-slice mentions → `unresolved_entities`.
   as a modality result.
 
 **Mechanical-invariant tests (TDD):** sitelink-band filter; undirected path on `book→author←book`;
-spurious shared-literal rejected; composed-manifest attribution; deterministic-leverage identity;
-grade-against-reference invariant. **Adversarial re-review** each phase; **empirical pilot** (~10 q on
-a small real slice) before locking.
+spurious shared-literal rejected; composed-manifest attribution; **bit-identical verification** (same
+answer text => bit-identical `claims` list (the grading output), excluding metadata fields run_id/condition/sample_index); grade-against-reference invariant. **Adversarial
+re-review** each phase; **empirical pilot** (~10 q on a small real slice) before locking.
 
 ---
 
@@ -372,12 +454,13 @@ SPARQLWrapper (W3C), WikibaseIntegrator (MIT); QLever (public fallback). **Groun
 ## 8. End-to-end data flow
 **Build (online, once):** `pipeline.py` → enumerate (band) + filter → fetch triples/description →
 freeze `frozen/books/...`; author manifests + question bank + content labels. **Precompute
-(offline-capable):** (question × {full, manifest entry} × **N draws**) assemble→`generate_answer`→
-`ground_response` → `data/runs/<id>.json` (a RunSet per question), aggregated to `ClaimDiagnostics`/
-`AnswerDiagnostics` (§4.8); per-modality error. **Runtime (demo):** load frozen slice + the
-**frozen scenario** run-sets → render panels → coordinated interactions are store/stylesheet updates.
-**Two live paths:** the repair loop (one call), and **live N-generation for a new question** (§4.6,
-bulk N×conditions — minutes on the local model; not used for the canned on-stage story).
+(offline-capable):** (question × {full, manifest entry} × **N runs**) assemble→`generate_answer`→
+`ground_response` → `data/runs/<id>.json` (the N runs per question/condition), aggregated to
+`AnswerDiagnostics` (§4.8: answer-level status mean+/-SE + support-frequency over KG-item IDs);
+per-modality error. **Runtime (demo):** load frozen slice + the **frozen scenario** run-sets → render
+panels → coordinated interactions are store/stylesheet updates. **Two live paths:** the repair loop
+(edit-the-KG + re-run), and **live multi-run for a new question** (§4.6, N runs — minutes on the
+local model; not used for the canned on-stage story).
 
 ## 9. Build sequence
 P0-a scaffold/schema/config → P0-b books data layer + freeze + overlap check → P0-c perturbation +
@@ -389,18 +472,17 @@ repair loop) → EX6 reports/recording. **After M-BOOKS:** open the image specs/
 Live SPARQL build-time only (cached, deterministic order, QLever fallback). Answers/claims/groundings
 precomputed + cached by input hash; manifest fixed before inspection; fixed model ids + `tau`. The
 **reported figures and the on-stage demo run off frozen scenario run-sets** (reproducible, offline).
-Live calls are (a) the repair loop and (b) opt-in live N-generation for a *new* question (temp > 0 for
-the diagnostics' variance; the displayed answer is FULL draw #0) — never the source of reported
-numbers. Classification is deterministic given a fixed answer text, so a frozen scenario re-renders
-identically.
+Live calls are (a) the repair loop (edit-the-KG + re-run) and (b) opt-in live multi-run for a *new*
+question (temp > 0 for the across-run variance) — never the source of reported numbers. Classification
+is deterministic given a fixed answer text, so a frozen scenario re-renders identically.
 
 ## 11. Risks & mitigations
 Content/structure redundancy → books overlap check + content-only questions. "reasoned-supportable"
 thorniest → path + entailment gate + `spurious_path` + per-modality error. Directed-path
 false-negatives → undirected traversal + test. Spurious shared-literal paths → literal exclusion +
-test. Repair-leverage nondeterminism → deterministic primary metric. Cited backend doesn't exist →
-reimplement KGR; vendor MIT prompts. Entity out of slice → `unresolved_entities`. *(Image-axis risks:
-image specs.)*
+test. Small-N status mean/SE → SE of the proportion + prominent caveat, N=20 a floor. Cited backend
+doesn't exist → reimplement KGR; vendor MIT prompts. Entity out of slice → `unresolved_entities`.
+*(Image-axis risks: image specs.)*
 
 ## 12. Decisions & open assumptions
 Generic `BaseAIClient` (local/open default + cloud); pluggable entity linker (`LabelAliasIndex`
