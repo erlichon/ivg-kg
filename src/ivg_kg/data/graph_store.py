@@ -405,6 +405,7 @@ def nx_to_cyto_elements(snapshot: KGSnapshot) -> list[dict[str, Any]]:
                     "source": subj,
                     "target": tgt,
                     "label": edge_data.get("property_label", ""),
+                    "property_id": edge_data.get("property_id", ""),
                 }
             }
         )

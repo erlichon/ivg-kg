@@ -15,7 +15,7 @@ from dash import html
 
 from app import theme
 from ivg_kg.config import SUBGRAPH_NODE_CAP
-from ivg_kg.schema import ClaimRecord, SupportSource
+from ivg_kg.schema import ClaimRecord, ClaimStatus, SupportSource
 
 PLACEHOLDER_IMG = "/assets/placeholder_entity.svg"
 
@@ -80,6 +80,12 @@ BASE_STYLESHEET: list[dict] = [
         # de-emphasised neighbours (1st-degree context, not on a claim path).
         "selector": 'node[faded = "1"]',
         "style": {"opacity": 0.45},
+    },
+    {
+        # injected edges (added by the analyst — CogMG) shown green + dashed.
+        "selector": 'edge[injected = "1"]',
+        "style": {"line-color": "#3fb950", "line-style": "dashed",
+                  "target-arrow-color": "#3fb950", "width": 2.5},
     },
 ]
 
@@ -246,6 +252,36 @@ def node_detail_content(node_data: dict | None) -> html.Div:
     )
 
 
+def edge_detail_content(edge_data: dict, base_triple_ids: set[str]) -> html.Div:
+    """Edge-detail pane: show the triple + a remove control (base triples only)."""
+    label = edge_data.get("label", "")
+    pid = edge_data.get("property_id", "")
+    injected = edge_data.get("injected") == "1"
+    rows: list = [
+        html.Div(
+            [html.Span("triple ", style={"color": theme.FAINT, "fontSize": "0.72em"}),
+             html.Span(f"{edge_data.get('source', '?')} —[{label}]→ {edge_data.get('target', '?')}",
+                       style={"color": theme.TEXT, "fontSize": "0.82em", "fontFamily": theme.MONO})],
+            style={"marginBottom": "8px"},
+        ),
+    ]
+    if injected:
+        rows.append(html.Div("injected (CogMG) — remove it from the inject panel below.",
+                             style={"color": "#3fb950", "fontSize": "0.74em"}))
+    elif pid in base_triple_ids:
+        rows.append(html.Button(
+            "✕ remove this triple from the graph",
+            id={"type": "remove-edge", "triple": pid},
+            n_clicks=0,
+            style={"background": theme.PANEL_ALT,
+                   "color": theme.STATUS_COLORS[ClaimStatus.FABRICATED.value],
+                   "border": f"1px solid {theme.STATUS_COLORS[ClaimStatus.FABRICATED.value]}",
+                   "borderRadius": "4px", "padding": "3px 10px", "cursor": "pointer",
+                   "fontFamily": theme.MONO, "fontSize": "0.74em"},
+        ))
+    return html.Div(rows)
+
+
 def get_subgraph_panel(elements: list[dict]) -> html.Div:
     """Compose the Subgraph panel (overview state = all claim nodes + neighbours)."""
     return html.Div(
@@ -270,7 +306,8 @@ def get_subgraph_panel(elements: list[dict]) -> html.Div:
                 style={"marginBottom": "8px", "overflow": "hidden"},
             ),
             html.Div(
-                "Select claims (left) to brush their support paths · tap a node to zoom + inspect.",
+                "Brush claims (left) onto paths · tap a NODE to inspect/zoom · "
+                "tap an EDGE to remove that triple from the graph.",
                 style={"color": theme.FAINT, "fontSize": "0.72em", "marginBottom": "8px"},
             ),
             dash_cytoscape.Cytoscape(

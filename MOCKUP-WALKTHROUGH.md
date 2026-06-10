@@ -69,18 +69,18 @@ strip renders `error_rates` (text-NLI 6%, structure-path 9%).
   mock; the on-stage figures run off precomputed offline run-sets (§4.6/§10).
 
 ## Graph editor + repair loop (SPEC-text §4.6, RQ3 + CogMG)
-The defining interaction, in the full-width strip at the bottom (**Overview →
-Inspection → Repair → Overview**). **Flow:** edit the graph → the answer is
-regenerated from the new generation context → the claims are re-verified against
-the full reference. The chip row shows the re-verified statuses; "grounded N/6"
-updates live.
-- **Remove / add** any evidence item (the four triples + the description). **Remove**
-  ablates it (e.g. remove `father (P22)` → "father was Nicolas Chopin" and the
-  France-via-father path flip to Fabricated, 5/6 → 3/6); **add** restores it (RQ3).
-- **Inject** a fact the KG lacked (`date of birth = 15 April 1771`) → the value-error
-  date claim corrects (CogMG — the only edit that touches the reference).
-- **Presets** set the standard conditions (full / knowledge-absent / content-absent).
-  Removing the **description** leaves the structural claims intact (manipulation check).
+The defining interaction. Ablation is **per specific triple** — there is no global
+"knowledge-absent" mode; you edit the **graph itself**. **Flow:** edit the graph →
+the answer is regenerated from the new context → the claims re-verify against the
+full reference, so **both the subgraph and the answer update**.
+- **Remove on the graph:** tap an **edge** in the Subgraph panel → its triple shows in
+  the entity-detail pane with **"✕ remove this triple"**. Removing it drops the edge
+  *and* recolours the answer (e.g. remove `father (P22)` → "father was Nicolas Chopin"
+  and the France-via-father path flip to Fabricated; "grounded 5/6 → 3/6").
+- **Re-add (RQ3 repair):** removed triples appear in the bottom strip with **"+ re-add"**.
+- **Inject (CogMG):** the bottom strip has an **editable inject form** — subject / relation /
+  value, pre-filled with a model **↻ suggestion** but fully editable; **✚ inject** adds the
+  new triple (green dashed edge) and corrects the value-error date claim.
   → `screenshots/07-repair-loop.png`
 
 > Mock note: scripted + deterministic (no real generation/injection) — it shows the
@@ -107,7 +107,7 @@ updates live.
 | `screenshots/03-multiselect-brush.png` | Multi-selected claims brushed onto the subgraph with badges + readable edge labels (#2) |
 | `screenshots/04-node-zoom-detail.png` | Node tapped → zoom + entity-detail pane (#7) |
 | `screenshots/06-generation-settings.png` | ⚙ generation-settings panel open (mock LLM params) |
-| `screenshots/07-repair-loop.png` | Graph editor: removed `father (P22)` (c1/c5 fabricate) + injected the date (c3 grounds) → grounded 4/6 |
+| `screenshots/07-repair-loop.png` | Graph editor: tapped the `father (P22)` edge → removed it → subgraph edge gone + answer's c1/c5 recolour to Fabricated (grounded 3/6); editable inject form below |
 
 ## Authored design details (where the spec left them open)
 - **Node cap:** `SUBGRAPH_NODE_CAP = 40` (`src/ivg_kg/config.py`).

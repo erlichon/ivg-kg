@@ -107,17 +107,17 @@ def test_distribution_has_mean_and_std():
 
 def test_graph_editor_logic():
     # full graph: 5 grounded (c3 = value-error fabricated until the date is injected)
-    assert fx.grounded_count(fx.ALL_EVIDENCE_IDS, []) == 5
+    assert fx.grounded_count(fx.ALL_TRIPLE_IDS, []) == 5
     # remove the father triple (P22) -> c1 (and c5, which needs P22) fabricate
-    without_p22 = [e for e in fx.ALL_EVIDENCE_IDS if e != "P22"]
+    without_p22 = [t for t in fx.ALL_TRIPLE_IDS if t != "P22"]
     s = fx.statuses_for_graph(without_p22, [])
     assert s["c1"].value == "fabricated" and s["c5"].value == "fabricated"
     assert s["c2"].value != "fabricated"  # P19 still present
-    # removing the description (content) leaves the structural claims intact
-    without_desc = [e for e in fx.ALL_EVIDENCE_IDS if e != "DESC"]
-    assert fx.grounded_count(without_desc, []) == fx.grounded_count(fx.ALL_EVIDENCE_IDS, [])
-    # knowledge-absent preset -> all fabricated; injecting the date grounds c3
-    ka = fx.statuses_for_graph(fx.CONDITION_PRESENT["knowledge-absent"], [])
-    assert all(v.value == "fabricated" for v in ka.values())
-    injected = fx.statuses_for_graph(fx.CONDITION_PRESENT["knowledge-absent"], [fx.INJECT_ITEM["id"]])
-    assert injected["c3"].value == "retrieved"
+    # injecting an (editable) date-of-birth triple grounds the value-error claim c3
+    inj = [{"subject": fx.NCHOPIN, "relation": "date of birth", "value": "15 April 1771"}]
+    assert fx.statuses_for_graph(fx.ALL_TRIPLE_IDS, inj)["c3"].value == "retrieved"
+    # editable elements: the removed triple's edge is gone; the injected edge is tagged
+    edges = [e for e in fx.editable_elements(without_p22, inj) if "source" in e["data"]]
+    assert "P22" not in {e["data"].get("property_id") for e in edges}
+    assert any(e["data"].get("injected") == "1" for e in edges)
+    assert [t["id"] for t in fx.removed_triples(without_p22)] == ["P22"]

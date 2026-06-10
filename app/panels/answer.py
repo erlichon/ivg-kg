@@ -66,10 +66,15 @@ def _question_bubble(question: str) -> html.Div:
     )
 
 
-def _answer_with_spans(run: GroundingRun) -> html.Div:
-    """Render answer_text with clickable status-coloured spans for claims."""
+def answer_span_children(run: GroundingRun, status_override: dict | None = None) -> list:
+    """Build the answer-text spans, coloured by status (or by an override map).
+
+    status_override maps claim_id -> ClaimStatus (e.g. after a graph edit), so the
+    inline answer recolours when the verifier re-runs on the edited graph.
+    """
     text = run.answer_text
-    status_by_id = {c.claim_id: c.status.value for c in run.claims}
+    eff = status_override or {c.claim_id: c.status for c in run.claims}
+    status_by_id = {cid: (s.value if hasattr(s, "value") else s) for cid, s in eff.items()}
 
     # Locate each claim's span substring; keep only found, non-overlapping, sorted.
     spans: list[tuple[int, int, str]] = []
@@ -109,12 +114,17 @@ def _answer_with_spans(run: GroundingRun) -> html.Div:
         cursor = end
     if cursor < len(text):
         children.append(html.Span(text[cursor:]))
+    return children
 
+
+def _answer_with_spans(run: GroundingRun) -> html.Div:
+    """The assistant answer bubble; its inner #answer-spans recolours on edits."""
     return html.Div(
         [
             html.Span("assistant", style={"color": theme.FAINT, "fontSize": "0.7em"}),
             html.Div(
-                children,
+                answer_span_children(run),
+                id="answer-spans",
                 style={
                     "background": theme.PANEL_ALT,
                     "border": f"1px solid {theme.BORDER}",
@@ -158,23 +168,27 @@ def render_claim_list(
     run: GroundingRun,
     selected_ids: list[str] | None = None,
     active_grades: list[str] | None = None,
+    status_override: dict | None = None,
 ) -> list[html.Div]:
     """Render the claim rows (filtered by grade; selected rows outlined + badged).
 
-    Used by both the initial panel and the reactive callback. Empty/None
-    active_grades means "show all" (clearing the filter shows everything).
+    status_override maps claim_id -> ClaimStatus (after a graph edit), so the list
+    recolours/re-filters by the re-verified status. Empty/None active_grades means
+    "show all".
     """
     selected_ids = selected_ids or []
     grades = active_grades if active_grades else list(_GRADE_ORDER)
     badge_for = {cid: i + 1 for i, cid in enumerate(selected_ids)}
+    override = status_override or {}
 
     rows: list[html.Div] = []
     for c in run.claims:
-        if c.status.value not in grades:
+        status = override.get(c.claim_id, c.status)
+        if status.value not in grades:
             continue
-        color = theme.status_color(c.status.value)
+        color = theme.status_color(status.value)
         is_sel = c.claim_id in badge_for
-        grounded = c.status != ClaimStatus.FABRICATED
+        grounded = status != ClaimStatus.FABRICATED
         # Process pillar, merged into the row: proposed → verified ✓/✗.
         verify_mark = html.Span(
             "✓" if grounded else "✗",
@@ -182,7 +196,7 @@ def render_claim_list(
             style={"color": theme.TEXT if grounded else color, "fontWeight": "bold",
                    "marginRight": "6px", "fontFamily": theme.MONO},
         )
-        children = [verify_mark, _status_chip(c.status.value), html.Span(c.text)]
+        children = [verify_mark, _status_chip(status.value), html.Span(c.text)]
         if is_sel:
             children.insert(
                 0,

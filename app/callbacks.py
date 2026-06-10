@@ -1,20 +1,23 @@
-"""Callbacks for the IVG-KG mockup — the eight interactions (SPEC-text §4.5).
+"""Callbacks for the IVG-KG mockup (SPEC-text §4.5 / §4.6).
 
-Selection state lives in one store, ``selected-claims`` (an ordered list of
-claim_ids; order = badge order). It is written by exactly one callback (claim
-row / span clicks); every other callback only READS it — no circular callbacks.
+Selection lives in ``selected-claims``; the editable graph lives in
+``present-triples`` (which triples are in the graph) + ``injected`` (added
+triples). Each store is written by exactly one callback; everything else reads —
+no circular callbacks.
 
-Callbacks:
-  A  claim row/span click  -> selected-claims.data            (toggle; sole writer)
-  B  selected + status-filter -> claim-list.children          (#1 filter, #2 multi-select)
-  C  selected             -> subgraph.stylesheet              (#2 brush; append-only)
-  D  selected + N         -> per-claim-analytics.children     (#4/#6 per-claim view)
-  E  N                    -> status-dist-graph.figure + fab-rate.children  (#5)
-  F  node tap / reset     -> subgraph.elements + entity-detail.children     (#7/#8 zoom)
-  G  ⚙ toggle             -> settings-panel.style
-  H  preset / add-remove  -> present-evidence.data   (graph editor)
-  I  preset / inject      -> injected-evidence.data
-  J  present + injected   -> repair-body.children     (re-verify after each edit)
+  A  claim row/span click      -> selected-claims                (toggle; sole writer)
+  B  selected+filter+graph     -> claim-list.children            (re-verified statuses)
+  C  selected                  -> subgraph.stylesheet            (brush; append-only)
+  D  selected + N              -> per-claim-analytics.children
+  E  N                         -> status-dist-graph + fab-rate
+  G  ⚙ toggle                  -> settings-panel.style
+  Elem present+injected+tap/reset -> subgraph.elements + layout  (edits + zoom)
+  Det  tapNode / tapEdge       -> entity-detail.children          (inspect / remove control)
+  H  remove-edge / re-add      -> present-triples                 (graph edit)
+  I  inject / remove-inject    -> injected                        (editable inject)
+  L  suggest                   -> inject form fields              (model suggestion)
+  J  present + injected        -> repair-body.children            (re-add list + grounded)
+  K  present + injected        -> answer-spans.children           (recolour the answer)
 """
 from __future__ import annotations
 
@@ -24,17 +27,25 @@ from dash.exceptions import PreventUpdate
 
 from app.charts.status_dist import make_status_distribution_figure
 from app.panels.analytics import fab_rate_readout, per_claim_sections
-from app.panels.answer import render_claim_list
+from app.panels.answer import answer_span_children, render_claim_list
 from app.panels.repair import render_repair_body
 from app.panels.subgraph import (
     BASE_STYLESHEET,
+    edge_detail_content,
     ego_elements,
     highlight_stylesheet,
     node_detail_content,
     node_labels_from_elements,
 )
-from ivg_kg.mock.fixtures import ALL_EVIDENCE_IDS, CONDITION_PRESENT
+from ivg_kg.mock.fixtures import (
+    ALL_TRIPLE_IDS,
+    SUGGESTED_INJECT,
+    editable_elements,
+    statuses_for_graph,
+)
 from ivg_kg.schema import AnswerDiagnostics, GroundingRun
+
+_LAYOUT = {"name": "cose", "animate": False, "fit": True, "padding": 24}
 
 
 def register_callbacks(
@@ -43,13 +54,13 @@ def register_callbacks(
     elements: list[dict],
     diagnostics_by_n: dict[int, AnswerDiagnostics],
 ) -> None:
-    """Register the eight-interaction callbacks (closures over the mock data)."""
+    """Register all callbacks (closures over the mock data)."""
     claims_by_id = {c.claim_id: c for c in run.claims}
     id_to_key = {c.claim_id: c.claim_key for c in run.claims}
     node_labels = node_labels_from_elements(elements)
-    overview_elements = list(elements)
+    base_triple_ids = set(ALL_TRIPLE_IDS)
 
-    # ---- A: claim click -> selected-claims (toggle; the only writer) --------
+    # ---- A: claim click -> selected-claims (toggle; sole writer) ------------
     @app.callback(
         Output("selected-claims", "data"),
         Input({"type": "claim-row", "claim_id": ALL}, "n_clicks"),
@@ -58,31 +69,29 @@ def register_callbacks(
         prevent_initial_call=True,
     )
     def toggle_selection(_rows, _spans, current):  # noqa: ANN001
-        trig = dash.ctx.triggered
-        trigger_id = dash.ctx.triggered_id
-        if not trigger_id or not isinstance(trigger_id, dict):
+        trig = dash.ctx.triggered_id
+        if not trig or not isinstance(trig, dict):
             raise PreventUpdate
-        # ignore spurious fires from dynamic re-render (n_clicks falsy)
-        if not trig or not trig[0].get("value"):
+        if not dash.ctx.triggered or not dash.ctx.triggered[0].get("value"):
             raise PreventUpdate
-        cid = trigger_id.get("claim_id")
+        cid = trig.get("claim_id")
         if cid not in claims_by_id:
             raise PreventUpdate
         selected = list(current or [])
-        if cid in selected:
-            selected.remove(cid)
-        else:
-            selected.append(cid)
+        selected.remove(cid) if cid in selected else selected.append(cid)
         return selected
 
-    # ---- B: selected + filter -> claim list (filter + outline/badge) --------
+    # ---- B: selected + filter + graph edits -> claim list -------------------
     @app.callback(
         Output("claim-list", "children"),
         Input("selected-claims", "data"),
         Input("status-filter", "value"),
+        Input("present-triples", "data"),
+        Input("injected", "data"),
     )
-    def render_list(selected, grades):  # noqa: ANN001
-        return render_claim_list(run, selected or [], grades or [])
+    def render_list(selected, grades, present, injected):  # noqa: ANN001
+        override = statuses_for_graph(present, injected or [])
+        return render_claim_list(run, selected or [], grades or [], status_override=override)
 
     # ---- C: selected -> subgraph stylesheet (append-only highlight) ---------
     @app.callback(
@@ -97,7 +106,7 @@ def register_callbacks(
         ordered = [claims_by_id[cid] for cid in selected if cid in claims_by_id]
         return highlight_stylesheet(BASE_STYLESHEET, ordered, node_labels)
 
-    # ---- D: selected + N -> per-claim analytics -----------------------------
+    # ---- D: selected + N -> per-claim cards ---------------------------------
     @app.callback(
         Output("per-claim-analytics", "children"),
         Input("selected-claims", "data"),
@@ -109,7 +118,6 @@ def register_callbacks(
         if not selected or diag is None:
             return per_claim_sections([])
         by_key = {c.claim_key: c for c in diag.claim_diagnostics}
-        # one card per selected claim, in selection order (all closed by default)
         diags = [
             by_key[id_to_key[cid]]
             for cid in selected
@@ -132,33 +140,39 @@ def register_callbacks(
         )
         return fig, fab_rate_readout(diag)
 
-    # ---- F: node tap / reset -> zoom elements + entity-detail (#7/#8) -------
+    # ---- Elem: graph edits + node zoom -> subgraph elements -----------------
     @app.callback(
         Output("subgraph", "elements"),
         Output("subgraph", "layout"),
-        Output("entity-detail", "children"),
+        Input("present-triples", "data"),
+        Input("injected", "data"),
         Input("subgraph", "tapNodeData"),
         Input("reset-view", "n_clicks"),
         prevent_initial_call=True,
     )
-    def node_zoom_and_detail(node_data, _reset):  # noqa: ANN001
-        # A fresh layout dict each call forces cytoscape to re-run cose + re-fit
-        # the viewport (otherwise the pan/zoom can stay stuck after an elements
-        # swap, which made "reset view" look like it did nothing).
-        layout = {"name": "cose", "animate": False, "fit": True, "padding": 24}
-        trigger_id = dash.ctx.triggered_id
-        if trigger_id == "reset-view":
-            return overview_elements, layout, node_detail_content(None)
-        # tapNodeData fired
-        if not node_data:
-            raise PreventUpdate
-        return (
-            ego_elements(overview_elements, node_data["id"]),
-            layout,
-            node_detail_content(node_data),
-        )
+    def update_elements(present, injected, node_data, _reset):  # noqa: ANN001
+        full = editable_elements(present, injected or [])
+        prop = dash.ctx.triggered[0]["prop_id"] if dash.ctx.triggered else ""
+        if prop.endswith("tapNodeData") and node_data:
+            return ego_elements(full, node_data["id"]), _LAYOUT  # zoom to node
+        return full, _LAYOUT  # full edited graph (edit / reset / deselect)
 
-    # ---- G: ⚙ toggle the generation-settings panel (#6) ---------------------
+    # ---- Det: tap node / edge -> entity-or-edge detail ----------------------
+    @app.callback(
+        Output("entity-detail", "children"),
+        Input("subgraph", "tapNodeData"),
+        Input("subgraph", "tapEdgeData"),
+        prevent_initial_call=True,
+    )
+    def show_detail(node_data, edge_data):  # noqa: ANN001
+        prop = dash.ctx.triggered[0]["prop_id"] if dash.ctx.triggered else ""
+        if prop.endswith("tapEdgeData") and edge_data:
+            return edge_detail_content(edge_data, base_triple_ids)
+        if prop.endswith("tapNodeData") and node_data:
+            return node_detail_content(node_data)
+        return node_detail_content(None)
+
+    # ---- G: ⚙ toggle the generation-settings panel --------------------------
     @app.callback(
         Output("settings-panel", "style"),
         Input("settings-toggle", "n_clicks"),
@@ -170,57 +184,82 @@ def register_callbacks(
         style["display"] = "block" if (n or 0) % 2 == 1 else "none"
         return style
 
-    # ---- H: graph editor — preset or add/remove -> present-evidence ---------
+    # ---- H: remove-edge / re-add -> present-triples (graph edit) ------------
     @app.callback(
-        Output("present-evidence", "data"),
-        Input({"type": "evidence-preset", "cond": ALL}, "n_clicks"),
-        Input({"type": "evidence-toggle", "item": ALL}, "n_clicks"),
-        State("present-evidence", "data"),
+        Output("present-triples", "data"),
+        Input({"type": "remove-edge", "triple": ALL}, "n_clicks"),
+        Input({"type": "readd", "item": ALL}, "n_clicks"),
+        State("present-triples", "data"),
         prevent_initial_call=True,
     )
-    def update_present(_presets, _toggles, current):  # noqa: ANN001
+    def update_present(_rm, _add, current):  # noqa: ANN001
         trig = dash.ctx.triggered_id
         if not dash.ctx.triggered or not dash.ctx.triggered[0].get("value"):
             raise PreventUpdate
-        if isinstance(trig, dict) and trig.get("type") == "evidence-preset":
-            return list(CONDITION_PRESENT.get(trig.get("cond"), ALL_EVIDENCE_IDS))
-        if isinstance(trig, dict) and trig.get("type") == "evidence-toggle":
-            present = list(current if current is not None else ALL_EVIDENCE_IDS)
-            item = trig.get("item")
-            if item in present:
-                present.remove(item)  # remove = ablate
-            else:
-                present.append(item)  # add back = restore
-            return present
-        raise PreventUpdate
+        present = list(current if current is not None else ALL_TRIPLE_IDS)
+        if isinstance(trig, dict) and trig.get("type") == "remove-edge":
+            t = trig.get("triple")
+            if t in present:
+                present.remove(t)
+        elif isinstance(trig, dict) and trig.get("type") == "readd":
+            t = trig.get("item")
+            if t not in present:
+                present.append(t)
+        return present
 
-    # ---- I: preset (reset) or inject -> injected-evidence -------------------
+    # ---- I: inject (editable) / remove-inject -> injected -------------------
     @app.callback(
-        Output("injected-evidence", "data"),
-        Input({"type": "evidence-preset", "cond": ALL}, "n_clicks"),
-        Input({"type": "evidence-inject", "item": ALL}, "n_clicks"),
-        State("injected-evidence", "data"),
+        Output("injected", "data"),
+        Input("inject-apply", "n_clicks"),
+        Input({"type": "remove-inject", "idx": ALL}, "n_clicks"),
+        State("inject-subject", "value"),
+        State("inject-relation", "value"),
+        State("inject-value", "value"),
+        State("injected", "data"),
         prevent_initial_call=True,
     )
-    def update_injected(_presets, _inject, current):  # noqa: ANN001
+    def update_injected(_apply, _rm, subject, relation, value, current):  # noqa: ANN001
         trig = dash.ctx.triggered_id
         if not dash.ctx.triggered or not dash.ctx.triggered[0].get("value"):
             raise PreventUpdate
-        if isinstance(trig, dict) and trig.get("type") == "evidence-preset":
-            return []  # presets reset injections
-        if isinstance(trig, dict) and trig.get("type") == "evidence-inject":
-            inj = list(current or [])
-            item = trig.get("item")
-            if item not in inj:
-                inj.append(item)
+        inj = list(current or [])
+        if trig == "inject-apply":
+            if not (relation and value):
+                raise PreventUpdate
+            inj.append({"subject": subject, "relation": relation, "value": value})
+            return inj
+        if isinstance(trig, dict) and trig.get("type") == "remove-inject":
+            i = trig.get("idx")
+            if isinstance(i, int) and 0 <= i < len(inj):
+                inj.pop(i)
             return inj
         raise PreventUpdate
 
-    # ---- J: present + injected -> re-verified editor body (#2/#3) -----------
+    # ---- L: suggest -> pre-fill the (editable) inject form ------------------
+    @app.callback(
+        Output("inject-subject", "value"),
+        Output("inject-relation", "value"),
+        Output("inject-value", "value"),
+        Input("inject-suggest", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def suggest(_n):  # noqa: ANN001
+        return SUGGESTED_INJECT["subject"], SUGGESTED_INJECT["relation"], SUGGESTED_INJECT["value"]
+
+    # ---- J: graph -> re-add list + grounded readout -------------------------
     @app.callback(
         Output("repair-body", "children"),
-        Input("present-evidence", "data"),
-        Input("injected-evidence", "data"),
+        Input("present-triples", "data"),
+        Input("injected", "data"),
     )
     def render_repair(present, injected):  # noqa: ANN001
         return render_repair_body(present, injected or [])
+
+    # ---- K: graph -> recolour the answer text spans -------------------------
+    @app.callback(
+        Output("answer-spans", "children"),
+        Input("present-triples", "data"),
+        Input("injected", "data"),
+    )
+    def recolour_answer(present, injected):  # noqa: ANN001
+        return answer_span_children(run, statuses_for_graph(present, injected or []))

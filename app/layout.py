@@ -17,7 +17,7 @@ from app.panels.answer import get_answer_panel
 from app.panels.repair import get_repair_panel
 from app.panels.subgraph import get_subgraph_panel
 from ivg_kg.mock.fixtures import (
-    ALL_EVIDENCE_IDS,
+    ALL_TRIPLE_IDS,
     mock_answer_diagnostics,
     mock_grounding_run,
     mock_subgraph_elements,
@@ -198,8 +198,8 @@ def get_layout(
     return html.Div(
         [
             dcc.Store(id="selected-claims", data=[]),
-            dcc.Store(id="present-evidence", data=list(ALL_EVIDENCE_IDS)),
-            dcc.Store(id="injected-evidence", data=[]),
+            dcc.Store(id="present-triples", data=list(ALL_TRIPLE_IDS)),
+            dcc.Store(id="injected", data=[]),
             _header(run),
             _settings_panel(),
             html.Div(

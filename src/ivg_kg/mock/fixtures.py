@@ -378,40 +378,38 @@ def mock_answer_diagnostics(n: int = _MAX_DRAWS) -> AnswerDiagnostics:
 
 
 # ---------------------------------------------------------------------------
-# Graph editor + repair loop (mock; SPEC-text §4.6 / RQ3 + CogMG augmentation)
+# Graph editor (mock; SPEC-text §4.6 / RQ3 + CogMG augmentation)
 # ---------------------------------------------------------------------------
-# Flow (what the editor demonstrates): ADD / REMOVE evidence from the graph →
-# the answer is regenerated from the new generation context → claims are
-# re-verified against the full grading reference (the reference is never changed
-# by 'remove'; 'inject' adds new ground truth — the CogMG case). REMOVING a
-# triple ablates it; ADDING it back is the RQ3 repair. Deterministic, offline.
+# The subgraph IS the editable KG. Ablation is PER SPECIFIC TRIPLE (no global
+# "knowledge-absent" mode): REMOVE a triple → it leaves the graph AND the answer
+# is regenerated without it → the claims re-verify. INJECT lets the analyst enter
+# a NEW triple (a model suggestion pre-fills it, but it is editable) — the CogMG
+# case. Deterministic, offline.
 
-# Togglable evidence items: present in / withheld from the generation context.
-EVIDENCE_ITEMS: list[dict] = [
-    {"id": "P22", "label": "father (P22): Chopin → Nicolas Chopin", "kind": "triple"},
-    {"id": "P19", "label": "place of birth (P19): Nicolas → Marainville", "kind": "triple"},
-    {"id": "P17", "label": "country (P17): Marainville → France", "kind": "triple"},
-    {"id": "P800", "label": "notable work (P800): Chopin → Nocturnes", "kind": "triple"},
-    {"id": "DESC", "label": "description: Nicolas Chopin (text content)", "kind": "content"},
+# The editable edges of the graph (the books triples).
+TRIPLES: list[dict] = [
+    {"id": "P22", "subj": FCHOPIN, "prop_label": "father",
+     "obj": NCHOPIN, "obj_label": "Nicolas Chopin", "literal": False},
+    {"id": "P19", "subj": NCHOPIN, "prop_label": "place of birth",
+     "obj": MARAIN, "obj_label": "Marainville-sur-Madon", "literal": False},
+    {"id": "P17", "subj": MARAIN, "prop_label": "country",
+     "obj": FRANCE, "obj_label": "France", "literal": False},
+    {"id": "P800", "subj": FCHOPIN, "prop_label": "notable work",
+     "obj": NOCT, "obj_label": "Nocturnes", "literal": False},
+    {"id": "P569", "subj": NCHOPIN, "prop_label": "date of birth",
+     "obj": None, "obj_label": DOB_TRUE, "literal": True},
 ]
-ALL_EVIDENCE_IDS: list[str] = [it["id"] for it in EVIDENCE_ITEMS]
+ALL_TRIPLE_IDS: list[str] = [t["id"] for t in TRIPLES]
+_TRIPLE_BY_ID: dict[str, dict] = {t["id"]: t for t in TRIPLES}
 
-# A fact the KG lacks/has wrong, that the analyst can INJECT as new ground truth.
-INJECT_ITEM: dict = {
-    "id": "P569",
-    "label": "date of birth (P569): Nicolas Chopin = 15 April 1771",
-    "note": "KG lacked the correct birthdate; the model hallucinated '17 June'.",
-}
+# Model suggestion that pre-fills the (editable) inject form.
+SUGGESTED_INJECT: dict = {"subject": NCHOPIN, "relation": "date of birth", "value": DOB_TRUE}
+ENTITY_OPTIONS: list[dict] = [
+    {"label": _NODE_LABELS[q], "value": q} for q in (FCHOPIN, NCHOPIN, MARAIN, FRANCE, NOCT)
+]
 
-# Quick presets: which evidence each named condition leaves present in the context.
-CONDITION_PRESENT: dict[str, list[str]] = {
-    "full": list(ALL_EVIDENCE_IDS),
-    "knowledge-absent": ["DESC"],                    # structural triples withheld
-    "content-absent": ["P22", "P19", "P17", "P800"],  # description withheld
-}
-CONDITIONS = list(CONDITION_PRESENT)
-
-# Structural evidence each claim needs PRESENT to ground (c3 = the injected date).
+# Structural triples each claim needs PRESENT to ground; c3 (the date value-error)
+# grounds only once a 'date of birth' triple is injected (the correction).
 CLAIM_COVERAGE: dict[str, frozenset[str]] = {
     "c1": frozenset({"P22"}),
     "c2": frozenset({"P19"}),
@@ -428,37 +426,88 @@ _GROUNDED_STATUS: dict[str, ClaimStatus] = {
 }
 
 
-def statuses_for_graph(
-    present: list[str] | None = None, injected: list[str] | None = None
-) -> dict[str, ClaimStatus]:
-    """Re-verify the claims given the evidence currently in the graph.
+def _date_injected(injected: list[dict] | None) -> bool:
+    return any("date" in (inj.get("relation") or "").lower() for inj in (injected or []))
 
-    A structural claim grounds iff all its required triples are present in the
-    context; the date claim (c3) grounds iff the correct date has been injected
-    (otherwise the model's hallucinated value fails the value-sensitive gate →
-    Fabricated). Grading is always against the full reference; what changes is the
-    model's regenerated answer under the edited context.
+
+def statuses_for_graph(
+    present: list[str] | None = None, injected: list[dict] | None = None
+) -> dict[str, ClaimStatus]:
+    """Re-verify the claims given the triples currently in the graph + injections.
+
+    A structural claim grounds iff all its required triples are present; c3 (the
+    date) grounds iff a 'date of birth' triple has been injected. Grading is always
+    against the full reference — what changes is the model's regenerated answer
+    under the edited graph.
     """
-    pres = set(present if present is not None else ALL_EVIDENCE_IDS)
-    inj = set(injected or [])
+    pres = set(present if present is not None else ALL_TRIPLE_IDS)
     out: dict[str, ClaimStatus] = {}
     for cid in ("c1", "c2", "c3", "c4", "c5", "c6"):
         if cid == "c3":
-            out[cid] = ClaimStatus.RETRIEVED if INJECT_ITEM["id"] in inj else ClaimStatus.FABRICATED
+            out[cid] = ClaimStatus.RETRIEVED if _date_injected(injected) else ClaimStatus.FABRICATED
         else:
             out[cid] = (
-                _GROUNDED_STATUS[cid]
-                if CLAIM_COVERAGE[cid] <= pres
-                else ClaimStatus.FABRICATED
+                _GROUNDED_STATUS[cid] if CLAIM_COVERAGE[cid] <= pres else ClaimStatus.FABRICATED
             )
     return out
 
 
-def grounded_count(present: list[str] | None = None, injected: list[str] | None = None) -> int:
+def grounded_count(present: list[str] | None = None, injected: list[dict] | None = None) -> int:
     """How many of the 6 claims currently ground (not Fabricated)."""
     return sum(
         1 for s in statuses_for_graph(present, injected).values() if s != ClaimStatus.FABRICATED
     )
+
+
+def removed_triples(present: list[str] | None) -> list[dict]:
+    """The triples currently withheld from the graph (for the re-add list)."""
+    pres = set(present if present is not None else ALL_TRIPLE_IDS)
+    return [t for t in TRIPLES if t["id"] not in pres]
+
+
+def editable_snapshot(
+    present: list[str] | None = None, injected: list[dict] | None = None
+) -> KGSnapshot:
+    """A KGSnapshot containing only the present triples (+ injected triples)."""
+    pres = set(present if present is not None else ALL_TRIPLE_IDS)
+    edges: list[KGEdge] = []
+    node_ids: set[str] = {FCHOPIN}  # always show the domain entity
+    for t in TRIPLES:
+        if t["id"] not in pres:
+            continue
+        node_ids.add(t["subj"])
+        if not t["literal"]:
+            node_ids.add(t["obj"])
+        edges.append(KGEdge(
+            subject_id=t["subj"], property_id=t["id"], property_label=t["prop_label"],
+            object_id=None if t["literal"] else t["obj"], object_label=t["obj_label"],
+            value_type=ValueType.TIME if t["literal"] else ValueType.ITEM,
+        ))
+    for inj in injected or []:
+        subj = inj.get("subject") or NCHOPIN
+        node_ids.add(subj)
+        edges.append(KGEdge(
+            subject_id=subj, property_id="INJ", property_label=inj.get("relation", "injected"),
+            object_id=None, object_label=inj.get("value", ""), value_type=ValueType.STRING,
+        ))
+    nodes = [
+        KGNode(id=q, label=_NODE_LABELS.get(q, q), description=_NODE_DESCRIPTIONS.get(q))
+        for q in _NODE_LABELS
+        if q in node_ids
+    ]
+    return KGSnapshot(snapshot_id="chopin-edit", slice="books", domain_qid=FCHOPIN,
+                      nodes=nodes, edges=edges, meta={})
+
+
+def editable_elements(
+    present: list[str] | None = None, injected: list[dict] | None = None
+) -> list[dict]:
+    """Cytoscape elements for the current edited graph; injected edges are tagged."""
+    els = nx_to_cyto_elements(editable_snapshot(present, injected))
+    for e in els:
+        if e["data"].get("property_id") == "INJ":
+            e["data"]["injected"] = "1"
+    return els
 
 
 def claim_text_by_id() -> dict[str, str]:

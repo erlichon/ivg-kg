@@ -185,11 +185,12 @@ def test_graph_editor_panel_and_callbacks():
     from app.panels.repair import get_repair_panel, render_repair_body
 
     assert get_repair_panel() is not None
-    # body renders for an edited graph (one triple removed)
-    body = str(render_repair_body([e for e in fx.ALL_EVIDENCE_IDS if e != "P22"], []))
-    assert "grounded" in body and "remove" in body
+    # body renders for an edited graph (one triple removed) -> re-add appears
+    body = str(render_repair_body([t for t in fx.ALL_TRIPLE_IDS if t != "P22"], []))
+    assert "grounded" in body and "re-add" in body
     app = make_app()
-    # each editor store written by exactly one callback (no circular)
-    assert sum(1 for k in app.callback_map if "present-evidence.data" in k) == 1
-    assert sum(1 for k in app.callback_map if "injected-evidence.data" in k) == 1
+    # each editable-graph store written by exactly one callback (no circular)
+    assert sum(1 for k in app.callback_map if "present-triples.data" in k) == 1
+    assert sum(1 for k in app.callback_map if "injected.data" in k) == 1
     assert sum(1 for k in app.callback_map if "repair-body.children" in k) == 1
+    assert sum(1 for k in app.callback_map if "answer-spans.children" in k) == 1
