@@ -1,0 +1,173 @@
+# Taskfile for ivg-kg — common dev actions.
+#
+# Requires:
+#   - go-task   (https://taskfile.dev) — `brew install go-task/tap/go-task`
+#   - uv        (https://docs.astral.sh/uv) — `brew install uv`
+#
+# Run `task` (or `task --list`) to see everything. Dependencies are installed
+# via `uv` into a local `.venv`; pytest/ruff live in the `[dev]` extra and the
+# Wikidata pull libs in the `[data]` extra, so `setup` syncs both. Tool tasks
+# use `--no-sync` to reuse that env without re-pruning extras on every call.
+
+version: '3'
+
+vars:
+  HOST: '{{.HOST | default "127.0.0.1"}}'
+  PORT: '{{.PORT | default "8050"}}'
+  SLICE_ID: '{{.SLICE_ID | default "books-p0-v1"}}'
+  RUNDIR: .run
+  PIDFILE: .run/app.pid
+  LOGFILE: .run/app.log
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  # --- environment ---------------------------------------------------------
+
+  setup:
+    desc: Create .venv and install core + dev + data dependencies (uv)
+    cmds:
+      - uv sync --extra dev --extra data
+    sources:
+      - pyproject.toml
+      - uv.lock
+
+  setup:all:
+    desc: Install everything incl. the heavy P1 grounding extra (transformers/torch)
+    cmds:
+      - uv sync --extra dev --extra data --extra grounding
+
+  # --- app lifecycle -------------------------------------------------------
+
+  run:
+    desc: Start the Dash app in the background (PID + logs under .run/)
+    deps: [setup]
+    silent: true
+    cmds:
+      - mkdir -p {{.RUNDIR}}
+      # Guard + launch + readiness check share one shell so the early `exit 0`
+      # truly aborts. uv run forks a child interpreter, so the wrapper PID is
+      # not the server; the process listening on the port is the source of
+      # truth (see `stop`).
+      - |
+        if [ -n "$(lsof -ti tcp:{{.PORT}} 2>/dev/null)" ]; then
+          echo "Already running at http://{{.HOST}}:{{.PORT}} (port {{.PORT}} in use)"
+          exit 0
+        fi
+        nohup uv run --no-sync python -c "from app.app import make_app; make_app().run(host='{{.HOST}}', port={{.PORT}}, debug=False)" > {{.LOGFILE}} 2>&1 &
+        for _ in $(seq 1 20); do
+          PIDS="$(lsof -ti tcp:{{.PORT}} 2>/dev/null || true)"
+          [ -n "$PIDS" ] && break
+          sleep 0.5
+        done
+        if [ -n "$PIDS" ]; then
+          printf '%s\n' $PIDS > {{.PIDFILE}}
+          echo "IVG-KG started at http://{{.HOST}}:{{.PORT}} (PIDs: $(echo $PIDS | tr '\n' ' '); logs -> {{.LOGFILE}})"
+        else
+          echo "Failed to start; last log lines:"; tail -n 20 {{.LOGFILE}}; exit 1
+        fi
+
+  dev:
+    desc: Run the Dash app in the foreground with hot-reload (Ctrl-C to stop)
+    deps: [setup]
+    cmds:
+      - uv run --no-sync python -c "from app.app import make_app; make_app().run(host='{{.HOST}}', port={{.PORT}}, debug=True)"
+
+  stop:
+    desc: Stop the background Dash app
+    silent: true
+    cmds:
+      # Kill whatever is bound to the port (+ any recorded PIDs), then wait for
+      # the port to actually release before returning so `restart` is safe.
+      - |
+        PIDS="$(lsof -ti tcp:{{.PORT}} 2>/dev/null || true)"
+        [ -f {{.PIDFILE}} ] && PIDS="$PIDS $(cat {{.PIDFILE}})"
+        if [ -n "$(echo $PIDS | tr -d ' ')" ]; then kill $PIDS 2>/dev/null || true; fi
+        for _ in $(seq 1 10); do
+          [ -z "$(lsof -ti tcp:{{.PORT}} 2>/dev/null)" ] && break
+          sleep 0.5
+        done
+        REM="$(lsof -ti tcp:{{.PORT}} 2>/dev/null || true)"
+        if [ -n "$REM" ]; then kill -9 $REM 2>/dev/null || true; sleep 0.5; fi
+        rm -f {{.PIDFILE}}
+        echo "IVG-KG stopped (port {{.PORT}})"
+
+  restart:
+    desc: Restart the background Dash app
+    cmds:
+      - task: stop
+      - task: run
+
+  status:
+    desc: Show whether the app is running
+    silent: true
+    cmds:
+      - |
+        PIDS="$(lsof -ti tcp:{{.PORT}} 2>/dev/null || true)"
+        if [ -n "$PIDS" ]; then
+          echo "running at http://{{.HOST}}:{{.PORT}} (PIDs: $(echo $PIDS | tr '\n' ' '))"
+        else
+          echo "not running"
+        fi
+
+  logs:
+    desc: Tail the background app log
+    cmds:
+      - tail -f {{.LOGFILE}}
+
+  # --- quality -------------------------------------------------------------
+
+  test:
+    desc: Run the test suite (pass extra args after --, e.g. `task test -- -k schema`)
+    deps: [setup]
+    cmds:
+      - uv run --no-sync pytest {{.CLI_ARGS}}
+
+  lint:
+    desc: Lint with ruff
+    deps: [setup]
+    cmds:
+      - uv run --no-sync ruff check .
+
+  format:
+    desc: Auto-format and apply safe lint fixes (ruff)
+    deps: [setup]
+    cmds:
+      - uv run --no-sync ruff format .
+      - uv run --no-sync ruff check --fix .
+
+  check:
+    desc: Run lint + tests (mirrors CI)
+    cmds:
+      - task: lint
+      - task: test
+
+  # --- data ----------------------------------------------------------------
+
+  freeze:
+    desc: "Build & freeze the books KG slice from LIVE Wikidata (build-time; hits the network, overwrites data/frozen/books/{{.SLICE_ID}})"
+    deps: [setup]
+    cmds:
+      - uv run --no-sync python -m ivg_kg.data.pipeline
+
+  # --- housekeeping --------------------------------------------------------
+
+  clean:
+    desc: Remove caches and runtime artifacts (keeps .venv and frozen data)
+    silent: true
+    cmds:
+      - rm -rf .pytest_cache .ruff_cache .task {{.RUNDIR}}
+      - find . -type d -name __pycache__ -prune -exec rm -rf {} +
+      - echo "cleaned caches"
+
+  clean:all:
+    desc: Deep clean incl. the virtualenv
+    deps: [clean]
+    silent: true
+    cmds:
+      - rm -rf .venv
+      - echo "removed .venv"

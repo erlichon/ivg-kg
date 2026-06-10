@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ivg-kg runtime data (build-time artifacts; not tracked)
+data/cache/
+data/runs/
+
+# Tool caches
+.ruff_cache/
+
+# go-task fingerprint cache + Taskfile runtime dir (app PID/logs)
+.task/
+.run/
+
+# Playwright MCP scratch (console logs / snapshots from screenshot capture)
+.playwright-mcp/

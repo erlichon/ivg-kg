@@ -1,0 +1,14 @@
+/* Hide the native <details> disclosure triangle for the ⓘ info indicators,
+   so the summary renders as just the ⓘ glyph. */
+details.ivg-info > summary {
+  list-style: none;
+}
+details.ivg-info > summary::-webkit-details-marker {
+  display: none;
+}
+details.ivg-info > summary::marker {
+  content: "";
+}
+details.ivg-info > summary:focus {
+  outline: none;
+}
