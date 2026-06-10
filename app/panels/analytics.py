@@ -46,14 +46,19 @@ _INFO_DIST = (
     "VERIFIER variance (the answer is fixed), not generation variance."
 )
 _INFO_TRUST = (
-    "Trust = the verifier's own error rate, per grading path (text-NLI gate; "
-    "structure path-search).\n"
-    "It is NOT derived from the runs above. It is measured once on a held-out, "
-    "hand-labelled gold sample: error = fraction of that sample the verifier grades "
-    "differently from the human label. Reported per path so the numbers above are "
-    "interpretable (text-NLI 6% ⇒ ~6% of text-grounded verdicts are wrong). "
-    "To compute it you need a hand-labelled eval set + the verifier run over it. "
-    "(Mock values here.)"
+    "Verifier reliability — measured ONCE on a gold (hand-labelled) set, not "
+    "derived from the runs above. Shown before per-claim so those numbers are "
+    "interpretable.\n\n"
+    "The verifier grades each claim by two paths:\n"
+    "• text-NLI — an NLI model (MiniCheck) checks whether the serialized reference "
+    "evidence (a triple / a curated content fact) ENTAILS the claim's asserted "
+    "value. Drives direct-triple + content grounding; value-sensitive.\n"
+    "• structure-path — searches the KG for an undirected multi-hop path "
+    "(2..k hops) that entails the claim → 'Supportable'.\n\n"
+    "Error per path: take a held-out sample of claims, a human labels each claim's "
+    "true status, run the verifier, error = fraction it grades differently from the "
+    "human. So text-NLI 6% ⇒ ~6% of text/NLI verdicts are wrong. "
+    "(Needs a hand-labelled gold set + the verifier run over it. Mock values here.)"
 )
 _INFO_STABILITY = (
     "Stability — how reproducible the verifier's verdict for THIS claim is over the "
@@ -137,7 +142,7 @@ def trust_strip(error_rates: dict[str, float]) -> html.Div:
         )
     return html.Div(
         [
-            html.Div(["TRUST · verifier error (per grading path)",
+            html.Div(["VERIFIER RELIABILITY · error on gold set (per grading path)",
                       theme.info_icon(_INFO_TRUST)],
                      style={"color": theme.FAINT, "fontSize": "0.68em",
                             "letterSpacing": "0.08em", "marginBottom": "6px"}),
@@ -278,16 +283,16 @@ def get_analytics_panel(run: GroundingRun, diagnostics: AnswerDiagnostics) -> ht
                 ),
                 config={"displayModeBar": False},
             ),
+            # --- trust / gold-set stats (before per-claim, per review) ---
+            trust_strip(run.error_rates),
             # --- per-claim ---
             html.Div(
                 "PER-CLAIM",
                 style={"color": theme.MUTED, "fontSize": "0.72em", "letterSpacing": "0.08em",
-                       "marginTop": "10px", "marginBottom": "6px",
+                       "marginTop": "12px", "marginBottom": "6px",
                        "borderTop": f"1px solid {theme.BORDER}", "paddingTop": "10px"},
             ),
             html.Div(per_claim_sections([]), id="per-claim-analytics"),
-            # --- trust ---
-            trust_strip(run.error_rates),
         ],
         id="analytics-panel",
         style=theme.panel_style(height="100%", overflowY="auto"),

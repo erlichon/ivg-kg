@@ -181,11 +181,15 @@ def test_status_distribution_figure_with_std():
     assert isinstance(fig, go.Figure)
 
 
-def test_repair_panel_and_callbacks():
+def test_graph_editor_panel_and_callbacks():
     from app.panels.repair import get_repair_panel, render_repair_body
 
     assert get_repair_panel() is not None
-    assert "repair-leverage" in str(render_repair_body("knowledge-absent", ["P22"]))
+    # body renders for an edited graph (one triple removed)
+    body = str(render_repair_body([e for e in fx.ALL_EVIDENCE_IDS if e != "P22"], []))
+    assert "grounded" in body and "remove" in body
     app = make_app()
-    assert sum(1 for k in app.callback_map if "repaired.data" in k) == 1
+    # each editor store written by exactly one callback (no circular)
+    assert sum(1 for k in app.callback_map if "present-evidence.data" in k) == 1
+    assert sum(1 for k in app.callback_map if "injected-evidence.data" in k) == 1
     assert sum(1 for k in app.callback_map if "repair-body.children" in k) == 1

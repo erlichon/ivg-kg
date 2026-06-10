@@ -68,18 +68,23 @@ strip renders `error_rates` (text-NLI 6%, structure-path 9%).
   top-p, max-new-tokens, model — for the live N-generation path. Presentational in the
   mock; the on-stage figures run off precomputed offline run-sets (§4.6/§10).
 
-## Repair loop — KG injection / restore (SPEC-text §4.6, RQ3 + CogMG)
+## Graph editor + repair loop (SPEC-text §4.6, RQ3 + CogMG)
 The defining interaction, in the full-width strip at the bottom (**Overview →
-Inspection → Repair → Overview**):
-- Pick a **condition** (full / knowledge-absent / content-absent). Under
-  **knowledge-absent** the dependent claims fabricate (absence-induced hallucination).
-- Each withheld triple is a card: **↺ restore** (RQ3 — re-add to the *generation
-  context*, regenerate, re-ground) or **✚ inject** (CogMG — add a genuinely-missing
-  triple to the *KG-full reference*). Click one → the dependent claim(s) flip
-  fabricated → grounded and the **repair-leverage** (+N claims re-grounded) updates.
-- e.g. *restore* `place of birth (P19)` grounds "born in Marainville"; *inject*
-  `date of birth (P569) = 15 April 1771` corrects the fabricated "17 June". →
-  `screenshots/07-repair-loop.png`
+Inspection → Repair → Overview**). **Flow:** edit the graph → the answer is
+regenerated from the new generation context → the claims are re-verified against
+the full reference. The chip row shows the re-verified statuses; "grounded N/6"
+updates live.
+- **Remove / add** any evidence item (the four triples + the description). **Remove**
+  ablates it (e.g. remove `father (P22)` → "father was Nicolas Chopin" and the
+  France-via-father path flip to Fabricated, 5/6 → 3/6); **add** restores it (RQ3).
+- **Inject** a fact the KG lacked (`date of birth = 15 April 1771`) → the value-error
+  date claim corrects (CogMG — the only edit that touches the reference).
+- **Presets** set the standard conditions (full / knowledge-absent / content-absent).
+  Removing the **description** leaves the structural claims intact (manipulation check).
+  → `screenshots/07-repair-loop.png`
+
+> Mock note: scripted + deterministic (no real generation/injection) — it shows the
+> interface and the flow so you can inspect it.
 
 ## Reading aids
 - **Variance model:** the answer is generated **once**; the **verifier** runs **N** times
@@ -97,12 +102,12 @@ Inspection → Repair → Overview**):
 ## Screenshots
 | file | shows |
 | --- | --- |
-| `screenshots/01-overview.png` | Overview (#8), merged answer column, full-answer analytics with error bars + ⓘ (#5), header controls, Trust strip |
-| `screenshots/02-fabricated-claim-perclaim.png` | Fabricated claim selected → per-claim stacked bar + leverage readouts (#4/#6) |
-| `screenshots/03-multiselect-brush.png` | Three claims multi-selected, brushed onto the subgraph with badges + readable edge labels (#2) |
+| `screenshots/01-overview.png` | Overview (#8), full-answer analytics (error bars + ⓘ), gold-set verifier-reliability **above** per-claim, graph-editor strip |
+| `screenshots/02-fabricated-claim-perclaim.png` | Selected claims → one collapsible per-claim card each, expanded for the stacked bar + leverage (#4/#6/#7) |
+| `screenshots/03-multiselect-brush.png` | Multi-selected claims brushed onto the subgraph with badges + readable edge labels (#2) |
 | `screenshots/04-node-zoom-detail.png` | Node tapped → zoom + entity-detail pane (#7) |
 | `screenshots/06-generation-settings.png` | ⚙ generation-settings panel open (mock LLM params) |
-| `screenshots/07-repair-loop.png` | Repair loop: knowledge-absent → restore P19 + inject P569 → claims re-ground, leverage +2 |
+| `screenshots/07-repair-loop.png` | Graph editor: removed `father (P22)` (c1/c5 fabricate) + injected the date (c3 grounds) → grounded 4/6 |
 
 ## Authored design details (where the spec left them open)
 - **Node cap:** `SUBGRAPH_NODE_CAP = 40` (`src/ivg_kg/config.py`).

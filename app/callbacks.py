@@ -11,6 +11,10 @@ Callbacks:
   D  selected + N         -> per-claim-analytics.children     (#4/#6 per-claim view)
   E  N                    -> status-dist-graph.figure + fab-rate.children  (#5)
   F  node tap / reset     -> subgraph.elements + entity-detail.children     (#7/#8 zoom)
+  G  ⚙ toggle             -> settings-panel.style
+  H  preset / add-remove  -> present-evidence.data   (graph editor)
+  I  preset / inject      -> injected-evidence.data
+  J  present + injected   -> repair-body.children     (re-verify after each edit)
 """
 from __future__ import annotations
 
@@ -29,6 +33,7 @@ from app.panels.subgraph import (
     node_detail_content,
     node_labels_from_elements,
 )
+from ivg_kg.mock.fixtures import ALL_EVIDENCE_IDS, CONDITION_PRESENT
 from ivg_kg.schema import AnswerDiagnostics, GroundingRun
 
 
@@ -165,33 +170,57 @@ def register_callbacks(
         style["display"] = "block" if (n or 0) % 2 == 1 else "none"
         return style
 
-    # ---- H: repair loop — condition change / apply repair -> repaired set ----
+    # ---- H: graph editor — preset or add/remove -> present-evidence ---------
     @app.callback(
-        Output("repaired", "data"),
-        Input("condition-selector", "value"),
-        Input({"type": "repair-item", "item": ALL}, "n_clicks"),
-        State("repaired", "data"),
+        Output("present-evidence", "data"),
+        Input({"type": "evidence-preset", "cond": ALL}, "n_clicks"),
+        Input({"type": "evidence-toggle", "item": ALL}, "n_clicks"),
+        State("present-evidence", "data"),
         prevent_initial_call=True,
     )
-    def update_repaired(_condition, _clicks, current):  # noqa: ANN001
+    def update_present(_presets, _toggles, current):  # noqa: ANN001
         trig = dash.ctx.triggered_id
-        if trig == "condition-selector":
-            return []  # reset repairs when the condition changes
-        if isinstance(trig, dict) and trig.get("type") == "repair-item":
-            if not dash.ctx.triggered or not dash.ctx.triggered[0].get("value"):
-                raise PreventUpdate
-            rep = list(current or [])
+        if not dash.ctx.triggered or not dash.ctx.triggered[0].get("value"):
+            raise PreventUpdate
+        if isinstance(trig, dict) and trig.get("type") == "evidence-preset":
+            return list(CONDITION_PRESENT.get(trig.get("cond"), ALL_EVIDENCE_IDS))
+        if isinstance(trig, dict) and trig.get("type") == "evidence-toggle":
+            present = list(current if current is not None else ALL_EVIDENCE_IDS)
             item = trig.get("item")
-            if item not in rep:
-                rep.append(item)
-            return rep
+            if item in present:
+                present.remove(item)  # remove = ablate
+            else:
+                present.append(item)  # add back = restore
+            return present
         raise PreventUpdate
 
-    # ---- I: condition + repaired -> repair-strip body (#7) ------------------
+    # ---- I: preset (reset) or inject -> injected-evidence -------------------
+    @app.callback(
+        Output("injected-evidence", "data"),
+        Input({"type": "evidence-preset", "cond": ALL}, "n_clicks"),
+        Input({"type": "evidence-inject", "item": ALL}, "n_clicks"),
+        State("injected-evidence", "data"),
+        prevent_initial_call=True,
+    )
+    def update_injected(_presets, _inject, current):  # noqa: ANN001
+        trig = dash.ctx.triggered_id
+        if not dash.ctx.triggered or not dash.ctx.triggered[0].get("value"):
+            raise PreventUpdate
+        if isinstance(trig, dict) and trig.get("type") == "evidence-preset":
+            return []  # presets reset injections
+        if isinstance(trig, dict) and trig.get("type") == "evidence-inject":
+            inj = list(current or [])
+            item = trig.get("item")
+            if item not in inj:
+                inj.append(item)
+            return inj
+        raise PreventUpdate
+
+    # ---- J: present + injected -> re-verified editor body (#2/#3) -----------
     @app.callback(
         Output("repair-body", "children"),
-        Input("condition-selector", "value"),
-        Input("repaired", "data"),
+        Input("present-evidence", "data"),
+        Input("injected-evidence", "data"),
     )
-    def render_repair(condition, repaired):  # noqa: ANN001
-        return render_repair_body(condition, repaired or [])
+    def render_repair(present, injected):  # noqa: ANN001
+        return render_repair_body(present, injected or [])

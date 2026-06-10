@@ -105,12 +105,19 @@ def test_distribution_has_mean_and_std():
     assert d.fabrication_rate_std >= 0.0
 
 
-def test_repair_loop_logic():
-    full = fx.effective_statuses("full")
-    assert sum(1 for s in full.values() if s.value != "fabricated") == 5
-    ka = fx.effective_statuses("knowledge-absent", [])
-    assert all(s.value == "fabricated" for s in ka.values())
-    assert fx.repair_leverage("knowledge-absent", []) == 0
-    all_items = [it["id"] for it in fx.REPAIR_ITEMS]
-    assert fx.repair_leverage("knowledge-absent", all_items) == 6
-    assert {"restore", "inject"} <= {it["kind"] for it in fx.REPAIR_ITEMS}
+def test_graph_editor_logic():
+    # full graph: 5 grounded (c3 = value-error fabricated until the date is injected)
+    assert fx.grounded_count(fx.ALL_EVIDENCE_IDS, []) == 5
+    # remove the father triple (P22) -> c1 (and c5, which needs P22) fabricate
+    without_p22 = [e for e in fx.ALL_EVIDENCE_IDS if e != "P22"]
+    s = fx.statuses_for_graph(without_p22, [])
+    assert s["c1"].value == "fabricated" and s["c5"].value == "fabricated"
+    assert s["c2"].value != "fabricated"  # P19 still present
+    # removing the description (content) leaves the structural claims intact
+    without_desc = [e for e in fx.ALL_EVIDENCE_IDS if e != "DESC"]
+    assert fx.grounded_count(without_desc, []) == fx.grounded_count(fx.ALL_EVIDENCE_IDS, [])
+    # knowledge-absent preset -> all fabricated; injecting the date grounds c3
+    ka = fx.statuses_for_graph(fx.CONDITION_PRESENT["knowledge-absent"], [])
+    assert all(v.value == "fabricated" for v in ka.values())
+    injected = fx.statuses_for_graph(fx.CONDITION_PRESENT["knowledge-absent"], [fx.INJECT_ITEM["id"]])
+    assert injected["c3"].value == "retrieved"

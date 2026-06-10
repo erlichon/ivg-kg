@@ -378,69 +378,87 @@ def mock_answer_diagnostics(n: int = _MAX_DRAWS) -> AnswerDiagnostics:
 
 
 # ---------------------------------------------------------------------------
-# Repair loop (mock; SPEC-text §4.6 / RQ3 + CogMG augmentation)
+# Graph editor + repair loop (mock; SPEC-text §4.6 / RQ3 + CogMG augmentation)
 # ---------------------------------------------------------------------------
-# Under KNOWLEDGE-ABSENCE these triples are withheld from the generation context,
-# so the dependent claims fabricate. The analyst either RESTORES a withheld
-# triple (RQ3 repair loop — re-add to the generation context, regenerate, re-
-# ground) or INJECTS a genuinely-missing one (CogMG — add to the KG-full
-# reference). Either re-grounds the dependent claims: repair-leverage = the
-# number that flip fabricated -> grounded. Deterministic, scripted, offline.
-CONDITIONS = ["full", "knowledge-absent", "content-absent"]
+# Flow (what the editor demonstrates): ADD / REMOVE evidence from the graph →
+# the answer is regenerated from the new generation context → claims are
+# re-verified against the full grading reference (the reference is never changed
+# by 'remove'; 'inject' adds new ground truth — the CogMG case). REMOVING a
+# triple ablates it; ADDING it back is the RQ3 repair. Deterministic, offline.
 
-# Which withheld triples each claim needs in order to ground (knowledge-absent).
+# Togglable evidence items: present in / withheld from the generation context.
+EVIDENCE_ITEMS: list[dict] = [
+    {"id": "P22", "label": "father (P22): Chopin → Nicolas Chopin", "kind": "triple"},
+    {"id": "P19", "label": "place of birth (P19): Nicolas → Marainville", "kind": "triple"},
+    {"id": "P17", "label": "country (P17): Marainville → France", "kind": "triple"},
+    {"id": "P800", "label": "notable work (P800): Chopin → Nocturnes", "kind": "triple"},
+    {"id": "DESC", "label": "description: Nicolas Chopin (text content)", "kind": "content"},
+]
+ALL_EVIDENCE_IDS: list[str] = [it["id"] for it in EVIDENCE_ITEMS]
+
+# A fact the KG lacks/has wrong, that the analyst can INJECT as new ground truth.
+INJECT_ITEM: dict = {
+    "id": "P569",
+    "label": "date of birth (P569): Nicolas Chopin = 15 April 1771",
+    "note": "KG lacked the correct birthdate; the model hallucinated '17 June'.",
+}
+
+# Quick presets: which evidence each named condition leaves present in the context.
+CONDITION_PRESENT: dict[str, list[str]] = {
+    "full": list(ALL_EVIDENCE_IDS),
+    "knowledge-absent": ["DESC"],                    # structural triples withheld
+    "content-absent": ["P22", "P19", "P17", "P800"],  # description withheld
+}
+CONDITIONS = list(CONDITION_PRESENT)
+
+# Structural evidence each claim needs PRESENT to ground (c3 = the injected date).
 CLAIM_COVERAGE: dict[str, frozenset[str]] = {
     "c1": frozenset({"P22"}),
     "c2": frozenset({"P19"}),
-    "c3": frozenset({"P569"}),
     "c4": frozenset({"P19", "P17"}),
     "c5": frozenset({"P22", "P19", "P17"}),
     "c6": frozenset({"P800"}),
 }
-
-# The status a claim takes once grounded again.
 _GROUNDED_STATUS: dict[str, ClaimStatus] = {
     "c1": ClaimStatus.RETRIEVED,
     "c2": ClaimStatus.RETRIEVED,
-    "c3": ClaimStatus.RETRIEVED,
     "c4": ClaimStatus.REASONED_SUPPORTABLE,
     "c5": ClaimStatus.REASONED_SUPPORTABLE,
     "c6": ClaimStatus.RETRIEVED,
 }
 
-# The repair palette shown under knowledge-absence. `restore` = RQ3 (re-add to
-# the generation context); `inject` = CogMG (add a new triple to the KG-full).
-REPAIR_ITEMS: list[dict] = [
-    {"id": "P22", "label": "father (P22): Chopin → Nicolas Chopin", "kind": "restore"},
-    {"id": "P19", "label": "place of birth (P19): Nicolas → Marainville", "kind": "restore"},
-    {"id": "P17", "label": "country (P17): Marainville → France", "kind": "restore"},
-    {"id": "P800", "label": "notable work (P800): Chopin → Nocturnes", "kind": "restore"},
-    {"id": "P569", "label": "date of birth (P569): Nicolas → 15 April 1771", "kind": "inject"},
-]
 
+def statuses_for_graph(
+    present: list[str] | None = None, injected: list[str] | None = None
+) -> dict[str, ClaimStatus]:
+    """Re-verify the claims given the evidence currently in the graph.
 
-def effective_statuses(condition: str, repaired: list[str] | None = None) -> dict[str, ClaimStatus]:
-    """Displayed claim status per condition, after applying restored/injected items.
-
-    full / content-absent: the canonical statuses (structure intact). knowledge-
-    absent: every claim fabricates until its needed triples are restored/injected.
+    A structural claim grounds iff all its required triples are present in the
+    context; the date claim (c3) grounds iff the correct date has been injected
+    (otherwise the model's hallucinated value fails the value-sensitive gate →
+    Fabricated). Grading is always against the full reference; what changes is the
+    model's regenerated answer under the edited context.
     """
-    rep = set(repaired or [])
-    canon = {c.claim_id: c.status for c in canonical_claims()}
-    if condition != "knowledge-absent":
-        return canon
+    pres = set(present if present is not None else ALL_EVIDENCE_IDS)
+    inj = set(injected or [])
     out: dict[str, ClaimStatus] = {}
-    for cid, need in CLAIM_COVERAGE.items():
-        out[cid] = _GROUNDED_STATUS[cid] if need <= rep else ClaimStatus.FABRICATED
+    for cid in ("c1", "c2", "c3", "c4", "c5", "c6"):
+        if cid == "c3":
+            out[cid] = ClaimStatus.RETRIEVED if INJECT_ITEM["id"] in inj else ClaimStatus.FABRICATED
+        else:
+            out[cid] = (
+                _GROUNDED_STATUS[cid]
+                if CLAIM_COVERAGE[cid] <= pres
+                else ClaimStatus.FABRICATED
+            )
     return out
 
 
-def repair_leverage(condition: str, repaired: list[str] | None = None) -> int:
-    """Number of claims grounded by the current repairs (knowledge-absence only)."""
-    if condition != "knowledge-absent":
-        return 0
-    rep = set(repaired or [])
-    return sum(1 for need in CLAIM_COVERAGE.values() if need <= rep)
+def grounded_count(present: list[str] | None = None, injected: list[str] | None = None) -> int:
+    """How many of the 6 claims currently ground (not Fabricated)."""
+    return sum(
+        1 for s in statuses_for_graph(present, injected).values() if s != ClaimStatus.FABRICATED
+    )
 
 
 def claim_text_by_id() -> dict[str, str]:
