@@ -48,35 +48,53 @@ stable KG-item IDs (entities, triplets) are.
   ≥1 grounded claim that run). Surfaced as **node-size / edge-weight on the subgraph**
   plus a **ranked list**. It is **observational importance** ("how often grounding routes
   through this item") — explicitly **NOT** causal leverage.
+- **Select KG items → highlight in the graph.** Click a row in the support-frequency
+  list (a ● node or ◆ triplet); it is highlighted on the subgraph with an accent
+  outline / thick accent edge — the same brush behaviour as selecting claims.
+  → `screenshots/05-multirun.png`
 - **Withhold-from-context selector** {full · content-withheld · knowledge-withheld} — see
   the next section; it shows the **distribution shift**.
 
-## Two perturbation layers (distinct grading semantics)
+## KG editing with per-edit SCOPE (the bottom KG EDITS strip)
+Every edit chooses a **scope** (the toggle), which decides what it touches — this *is*
+the SPEC §4.4 two-layer distinction, made interactive:
 
-**1. Withhold-from-context (RQ2 absence experiment) — Analytics, multi-run.**
-Hide a description (content) or a triplet (structure) from the **generation context
-only**. The item **stays in the grading reference**; grading is always against the
-**full** reference. So withholding shifts the multi-run status distribution toward
-fabrication **without relabelling true claims**. The result is the **shift** across
-{full, content-withheld, knowledge-withheld} — shown as the per-condition fabrication
-rate. In the mock: full ≈ 26% fabricated, content-withheld a mild rise, knowledge-withheld
-≈ 84% (structure withheld hurts most). **This layer never changes the grading reference.**
+- **generation only** — change the model's **generation context** only; grading still
+  uses the **FULL** reference (withhold-from-context, RQ2). Removing induces
+  absence-hallucination the verifier can still **catch**; adding lets the model state a
+  fact the verifier **cannot confirm**, so it does **not** repair the verdict.
+- **generation + verification** — change the **real KG**, so grading uses the **edited**
+  reference (edit-the-KG). Adding the missing date grounds c3 (gap-repair); removing
+  **blinds** the verifier.
 
-**2. Edit-the-KG (gap-repair / exploration) — the bottom GRAPH EDITS strip.**
-This **genuinely changes the KG / grading reference**, and grading then uses the
-**current (edited)** KG. → `screenshots/07-repair-loop.png`
-- **Gap-repair beat:** the date claim (c3) is fabricated because the KG holds no usable
-  birth-date fact. **Inject** the curated date (the form is pre-filled with a model
-  **↻ suggestion**, fully editable; **✚ inject**) → re-run → c3 flips to **retrieved**.
-- **Repair-leverage** = the **COUNT** of claims that flip FABRICATED → grounded on that
-  restore + re-run (RQ3). The strip shows e.g. **"+1 repaired: c3"** and replaces the bare
-  "grounded X/6" with a before→after framing (the absolute "grounded N/6 now" is kept too).
-- **Remove** a triple by tapping its **edge** in the Subgraph panel (free exploration) →
-  the edge leaves the KG and the answer recolours (e.g. remove `father (P22)` → c1 and the
-  France-via-father path flip to Fabricated). Removed triples come back via **"+ re-add"**.
+**The contrast in one move (the date gap):** the date claim (c3) is fabricated because the
+KG holds no usable birth-date fact (a genuine gap). Add the pre-filled date (✚ add triplet):
+- *generation+verification* → c3 flips to **retrieved**; **repair-leverage +1: c3**. → `screenshots/07-repair-loop.png`
+- *generation only* → the date appears as a **green-dashed** (model-only, unverified) edge,
+  but c3 stays **fabricated** ("unverifiable — the verifier's reference still lacks it") and
+  **repair-leverage +0**. → `screenshots/08-edit-scope.png`
 
-> A caption on both surfaces states the difference: **withhold-from-context never changes
-> the grading reference; edit-the-KG deliberately does.**
+**Edit operations (all scoped):**
+- **Add / remove a triplet.** Remove by tapping its **edge** (scope from the toggle); a
+  generation-only removal leaves the edge **dashed + dimmed** ("withheld from the model,
+  still in the verifier's reference"). Withheld base triples come back via **"+ re-add"**.
+- **Add an entity** (label + **optional description**) → a new node.
+- **Remove an entity's content** (description/image) from its **detail pane** (tap the
+  node): clears only the node's content — the node and its triplets stay. Scoped too
+  (generation-only = withheld from the model; generation+verification = removed from the KG).
+- **Edits log + undo:** every edit is listed with its scope and a **✕** to undo it.
+- **Repair-leverage** = the COUNT of claims that flip FABRICATED → grounded vs the original
+  answer; the "grounded N/6 now" absolute is kept alongside.
+
+> The graph encodes scope: solid = in both; **dashed-dim** = withheld from the model
+> (still verifiable); **green-dashed** = model-only (unverifiable). Captions on the strip
+> state: generation-only never changes the reference; generation+verification does.
+
+## Withhold-from-context shift (Analytics, multi-run)
+The multi-run **withhold** selector {full · content-withheld · knowledge-withheld} shows
+the per-condition fabrication rate — the distribution **shift** without relabelling true
+claims (grading stays against the full reference). In the mock: full ≈ 26% fabricated,
+content-withheld a mild rise, knowledge-withheld ≈ 84% (structure withheld hurts most).
 
 ## Subgraph interactions (shared by both modes)
 - **Multi-select → brush.** Click claim rows (or coloured answer spans). Each gets a
@@ -85,8 +103,10 @@ This **genuinely changes the KG / grading reference**, and grading then uses the
 - **1st-degree neighbourhood under a node cap** (`config.SUBGRAPH_NODE_CAP` = 40); the
   Chopin graph is small, so all nodes show.
 - **Tap a node → zoom + entity-detail** (bottom-middle): static placeholder image +
-  label/description. *⟲ reset view* restores the overview. → `screenshots/04-node-zoom-detail.png`
-- In **multi-run** mode the node sizes / edge widths reflect **support-frequency**.
+  label/description, and a **✕ remove this entity's content** button (scoped). *⟲ reset
+  view* restores the overview. → `screenshots/04-node-zoom-detail.png`
+- In **multi-run** mode the node sizes / edge widths reflect **support-frequency**, and a
+  click in the support list highlights the item here.
 
 ## Header controls
 - **Slice selector** (top-left): the one books scenario (Chopin) is selected; the gated
@@ -102,12 +122,13 @@ This **genuinely changes the KG / grading reference**, and grading then uses the
 ## Screenshots
 | file | shows |
 | --- | --- |
-| `screenshots/01-overview.png` | Single-run mode: status %/counts (no SE), the edit-the-KG strip below |
-| `screenshots/05-multirun.png` | Multi-run mode: mean±SE distribution + small-N caveat + withhold-from-context shift + support-frequency ranked list (subgraph sized by support-frequency) |
+| `screenshots/01-overview.png` | Single-run mode: status %/counts (no SE), the scoped KG-edits strip below |
+| `screenshots/05-multirun.png` | Multi-run: mean±SE distribution + small-N caveat + withhold shift + clickable support-frequency list; a selected triplet/node highlighted on the subgraph (which is sized by support-frequency) |
 | `screenshots/03-multiselect-brush.png` | Multi-selected claims brushed onto the subgraph with badges + readable edge labels |
 | `screenshots/04-node-zoom-detail.png` | Node tapped → zoom + entity-detail pane |
 | `screenshots/06-generation-settings.png` | ⚙ generation-settings panel open (mock LLM params) |
-| `screenshots/07-repair-loop.png` | Edit-the-KG: inject the curated date → c3 flips to grounded → "+1 repaired: c3" repair-leverage |
+| `screenshots/07-repair-loop.png` | Add the date *generation+verification* → date node added, c3 grounded, "+1 repaired: c3" |
+| `screenshots/08-edit-scope.png` | Add the date *generation only* → green-dashed (model-only) edge, c3 still fabricated (unverifiable), "+0 repaired" — the scope contrast |
 
 ## Authored design details (where the spec left them open)
 - **Node cap:** `SUBGRAPH_NODE_CAP = 40` (`src/ivg_kg/config.py`).
@@ -122,5 +143,12 @@ This **genuinely changes the KG / grading reference**, and grading then uses the
   support-frequency aggregates over stable KG-item IDs (`diagnostics.aggregate_runset`).
 - **Support-frequency** is observational: node size scales 40→96 px and edge width
   1.5→8.5 with the fraction of runs the item grounded a claim (`app/panels/subgraph.py`).
-- **Repair-leverage** is measured vs the original full-graph answer (only the date claim
-  is fabricated there), so injecting the curated date reports **+1 repaired: c3**.
+- **Scoped edits / grading:** a claim grounds iff its evidence is in BOTH the generation
+  context AND the verification reference (`fixtures.apply_edits` / `statuses_with_reasons`).
+  generation-only edits change only the generation view; generation+verification change
+  both. The date is a GAP (absent from the base KG); only a generation+verification add
+  repairs c3. **Repair-leverage** is measured vs the original answer, so the gap-repair
+  reports **+1 repaired: c3** (and the generation-only add reports +0 — unverifiable).
+- **Graph scope styling:** dashed-dim edge = withheld from the model (still in the
+  reference); green-dashed edge = model-only (unverifiable); dashed node border = added
+  entity / content-removed entity (`app/panels/subgraph.py` BASE_STYLESHEET).

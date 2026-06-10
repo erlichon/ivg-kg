@@ -82,10 +82,28 @@ BASE_STYLESHEET: list[dict] = [
         "style": {"opacity": 0.45},
     },
     {
-        # injected edges (added by the analyst — CogMG) shown green + dashed.
-        "selector": 'edge[injected = "1"]',
+        # edge withheld from the GENERATION context but still in the verification
+        # reference (generation-only removal): dimmed + dashed.
+        "selector": 'edge[scope_state = "ver_only"]',
+        "style": {"line-color": theme.FAINT, "line-style": "dashed",
+                  "target-arrow-color": theme.FAINT, "opacity": 0.5, "width": 1.5},
+    },
+    {
+        # edge in the GENERATION context only (added generation-only, not in the
+        # verification reference -> the verifier cannot confirm it): green dashed.
+        "selector": 'edge[scope_state = "gen_only"]',
         "style": {"line-color": "#3fb950", "line-style": "dashed",
                   "target-arrow-color": "#3fb950", "width": 2.5},
+    },
+    {
+        # a newly added entity (CogMG): accent dashed outline.
+        "selector": 'node[added = "1"]',
+        "style": {"border-color": theme.ACCENT, "border-width": 2, "border-style": "dashed"},
+    },
+    {
+        # an entity whose content (description/image) was removed: muted dashed.
+        "selector": "node[content_state]",
+        "style": {"border-style": "dashed", "border-color": theme.FAINT},
     },
 ]
 
@@ -191,6 +209,29 @@ def support_frequency_stylesheet(
     return list(base) + appended
 
 
+def kg_item_highlight_stylesheet(base: list[dict], selected_items: list[str]) -> list[dict]:
+    """Append accent highlights for selected KG items (multi-run); PURE.
+
+    Mirrors the claim-brush: a selected entity gets an accent outline, a selected
+    triplet ("<s>|<p>|<o>") gets a thick accent edge (id "<s>-<p>-<o>").
+    """
+    appended: list[dict] = []
+    for item in selected_items or []:
+        if "|" in item:
+            eid = item.replace("|", "-")
+            appended.append({
+                "selector": f'edge[id = "{eid}"]',
+                "style": {"line-color": theme.ACCENT, "target-arrow-color": theme.ACCENT,
+                          "width": 5, "z-index": 25, "opacity": 1},
+            })
+        else:
+            appended.append({
+                "selector": f'node[id = "{item}"]',
+                "style": {"border-color": theme.ACCENT, "border-width": 5, "opacity": 1},
+            })
+    return list(base) + appended
+
+
 def node_labels_from_elements(elements: list[dict]) -> dict[str, str]:
     """Map node id -> label from a cytoscape element list."""
     return {
@@ -270,31 +311,58 @@ def node_detail_content(node_data: dict | None) -> html.Div:
     if desc:
         body.append(html.Div(desc, style={"color": theme.MUTED, "fontSize": "0.8em",
                                            "lineHeight": "1.4"}))
+    if kind != "literal":
+        content_state = node_data.get("content_state")
+        if content_state:
+            note = ("content withheld from the model (still in the verifier's reference)"
+                    if content_state == "gen"
+                    else "content removed from the KG (also gone from the verifier)")
+            body.append(html.Div(f"— {note}", style={"color": theme.FAINT,
+                                 "fontSize": "0.72em", "fontStyle": "italic",
+                                 "marginTop": "4px"}))
+        else:
+            body.append(html.Button(
+                "✕ remove this entity's content (description/image)",
+                id={"type": "remove-content", "entity": node_data.get("id")},
+                n_clicks=0,
+                style={"background": theme.PANEL,
+                       "color": theme.STATUS_COLORS[ClaimStatus.FABRICATED.value],
+                       "border": f"1px solid {theme.STATUS_COLORS[ClaimStatus.FABRICATED.value]}",
+                       "borderRadius": "4px", "padding": "3px 8px", "cursor": "pointer",
+                       "fontFamily": theme.MONO, "fontSize": "0.72em", "marginTop": "6px"},
+            ))
     return html.Div(
         [media, html.Div(body, style={"marginLeft": "12px"})],
         style={"display": "flex", "alignItems": "flex-start"},
     )
 
 
+_SCOPE_STATE_NOTE = {
+    "ver_only": "withheld from the model (generation-only); still in the verifier's reference",
+    "gen_only": "in the model's context only (added generation-only); the verifier cannot confirm it",
+}
+
+
 def edge_detail_content(edge_data: dict, base_triple_ids: set[str]) -> html.Div:
-    """Edge-detail pane: show the triple + a remove control (base triples only)."""
+    """Edge-detail pane: show the triple + its scope state + a remove control."""
     label = edge_data.get("label", "")
     pid = edge_data.get("property_id", "")
-    injected = edge_data.get("injected") == "1"
+    scope_state = edge_data.get("scope_state", "both")
     rows: list = [
         html.Div(
             [html.Span("triple ", style={"color": theme.FAINT, "fontSize": "0.72em"}),
              html.Span(f"{edge_data.get('source', '?')} —[{label}]→ {edge_data.get('target', '?')}",
                        style={"color": theme.TEXT, "fontSize": "0.82em", "fontFamily": theme.MONO})],
-            style={"marginBottom": "8px"},
+            style={"marginBottom": "6px"},
         ),
     ]
-    if injected:
-        rows.append(html.Div("injected (CogMG) — remove it from the inject panel below.",
-                             style={"color": "#3fb950", "fontSize": "0.74em"}))
-    elif pid in base_triple_ids:
+    if scope_state in _SCOPE_STATE_NOTE:
+        rows.append(html.Div(f"— {_SCOPE_STATE_NOTE[scope_state]}",
+                             style={"color": theme.FAINT, "fontSize": "0.72em",
+                                    "fontStyle": "italic", "marginBottom": "6px"}))
+    if pid in base_triple_ids:
         rows.append(html.Button(
-            "✕ remove this triple from the graph",
+            "✕ remove this triple (scope from the toggle below)",
             id={"type": "remove-edge", "triple": pid},
             n_clicks=0,
             style={"background": theme.PANEL_ALT,
@@ -303,6 +371,9 @@ def edge_detail_content(edge_data: dict, base_triple_ids: set[str]) -> html.Div:
                    "borderRadius": "4px", "padding": "3px 10px", "cursor": "pointer",
                    "fontFamily": theme.MONO, "fontSize": "0.74em"},
         ))
+    else:
+        rows.append(html.Div("added triple — remove it from the edits list below.",
+                             style={"color": "#3fb950", "fontSize": "0.74em"}))
     return html.Div(rows)
 
 

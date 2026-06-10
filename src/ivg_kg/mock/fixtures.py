@@ -112,10 +112,8 @@ def chopin_snapshot() -> KGSnapshot:
             subject_id=FCHOPIN, property_id=P_FATHER[0], property_label=P_FATHER[1],
             object_id=NCHOPIN, object_label="Nicolas Chopin", value_type=ValueType.ITEM,
         ),
-        KGEdge(
-            subject_id=NCHOPIN, property_id=P_DOB[0], property_label=P_DOB[1],
-            object_id=None, object_label=DOB_TRUE, value_type=ValueType.TIME,
-        ),
+        # NB: the father's date of birth (P569) is a GAP -- absent from the base KG
+        # (the gap-repair target). It enters only when the analyst adds it (§4.4).
         KGEdge(
             subject_id=NCHOPIN, property_id=P_POB[0], property_label=P_POB[1],
             object_id=MARAIN, object_label="Marainville-sur-Madon", value_type=ValueType.ITEM,
@@ -136,8 +134,8 @@ def chopin_snapshot() -> KGSnapshot:
 
 
 def mock_subgraph_elements() -> list[dict]:
-    """dash-cytoscape elements for the Chopin subgraph (literal date node included)."""
-    return nx_to_cyto_elements(chopin_snapshot())
+    """dash-cytoscape elements for the base edited KG (the overview; date is a gap)."""
+    return editable_elements(None)
 
 
 _PROP_LABELS: dict[str, str] = {
@@ -446,169 +444,264 @@ def mock_condition_diagnostics(n: int = _MAX_DRAWS) -> dict[str, AnswerDiagnosti
 
 
 # ---------------------------------------------------------------------------
-# Edit-the-KG layer (mock; SPEC-text §4.4(b) / §4.6 / RQ3 + CogMG)
+# Editing layer with PER-EDIT SCOPE (mock; SPEC-text §4.4 / §4.6)
 # ---------------------------------------------------------------------------
-# This layer GENUINELY changes the KG / grading reference (distinct from
-# withhold-from-context, which never touches the reference). The subgraph IS the
-# editable KG: REMOVE a triple -> it leaves the KG and the claims re-grade against
-# the edited reference; INJECT lets the analyst add a NEW triple the KG lacked
-# (a model suggestion pre-fills it, editable) — the CogMG gap-repair. The
-# gap-repair beat: the date claim (c3) is fabricated because the KG holds no usable
-# birth-date fact; injecting the curated date + re-running flips c3 to grounded.
-# `repair_result` reports the FABRICATED -> grounded flip count (repair-leverage).
+# Every edit carries a SCOPE that decides what it touches:
+#   - "gen"  (generation only): change ONLY the model's generation context; the
+#            grading reference stays FULL. Withhold-from-context (RQ2): removing
+#            induces absence-hallucination the verifier can still CATCH; ADDING a
+#            fact lets the model state it but the verifier still cannot confirm it.
+#   - "both" (generation + verification): change the real KG, so grading uses the
+#            EDITED reference. Edit-the-KG (gap-repair): adding the missing date
+#            grounds c3; removing blinds the verifier.
+# A claim grounds iff its evidence is present in BOTH the generation context AND
+# the verification reference; otherwise it is fabricated, with a reason naming the
+# missing side. Edits are a single list of records, each:
+#   {"op": "add"|"remove", "kind": "triplet"|"entity"|"content", "scope": "gen"|"both",
+#    "id":..., "label":..., "description":..., "subject":..., "relation":..., "value":...}
+# The father's birth DATE is a GAP -- absent from the base KG (the gap-repair target).
 # Deterministic, offline.
 
-# The editable edges of the graph (the books triples).
+# Base structure triples (present in BOTH generation + verification at baseline).
 TRIPLES: list[dict] = [
-    {"id": "P22", "subj": FCHOPIN, "prop_label": "father",
-     "obj": NCHOPIN, "obj_label": "Nicolas Chopin", "literal": False},
-    {"id": "P19", "subj": NCHOPIN, "prop_label": "place of birth",
-     "obj": MARAIN, "obj_label": "Marainville-sur-Madon", "literal": False},
-    {"id": "P17", "subj": MARAIN, "prop_label": "country",
-     "obj": FRANCE, "obj_label": "France", "literal": False},
-    {"id": "P800", "subj": FCHOPIN, "prop_label": "notable work",
-     "obj": NOCT, "obj_label": "Nocturnes", "literal": False},
-    {"id": "P569", "subj": NCHOPIN, "prop_label": "date of birth",
-     "obj": None, "obj_label": DOB_TRUE, "literal": True},
+    {"id": "P22", "subj": FCHOPIN, "prop_label": "father", "obj": NCHOPIN,
+     "obj_label": "Nicolas Chopin", "literal": False},
+    {"id": "P19", "subj": NCHOPIN, "prop_label": "place of birth", "obj": MARAIN,
+     "obj_label": "Marainville-sur-Madon", "literal": False},
+    {"id": "P17", "subj": MARAIN, "prop_label": "country", "obj": FRANCE,
+     "obj_label": "France", "literal": False},
+    {"id": "P800", "subj": FCHOPIN, "prop_label": "notable work", "obj": NOCT,
+     "obj_label": "Nocturnes", "literal": False},
 ]
 ALL_TRIPLE_IDS: list[str] = [t["id"] for t in TRIPLES]
 _TRIPLE_BY_ID: dict[str, dict] = {t["id"]: t for t in TRIPLES}
 
-# Model suggestion that pre-fills the (editable) inject form.
+# Evidence key for the (gap) date-of-birth fact added during repair.
+DOB_KEY = "P569"
+
+# Model suggestion that pre-fills the (editable) add-triplet form: the missing date.
 SUGGESTED_INJECT: dict = {"subject": NCHOPIN, "relation": "date of birth", "value": DOB_TRUE}
 ENTITY_OPTIONS: list[dict] = [
     {"label": _NODE_LABELS[q], "value": q} for q in (FCHOPIN, NCHOPIN, MARAIN, FRANCE, NOCT)
 ]
+SCOPE_LABELS: dict[str, str] = {
+    "gen": "generation only", "both": "generation + verification",
+}
 
-# Structural triples each claim needs PRESENT to ground; c3 (the date value-error)
-# grounds only once a 'date of birth' triple is injected (the correction).
-CLAIM_COVERAGE: dict[str, frozenset[str]] = {
+# claim -> evidence it needs to ground (a date-of-birth fact for c3; structure else).
+CLAIM_DEPS: dict[str, frozenset[str]] = {
     "c1": frozenset({"P22"}),
     "c2": frozenset({"P19"}),
+    "c3": frozenset({DOB_KEY}),
     "c4": frozenset({"P19", "P17"}),
     "c5": frozenset({"P22", "P19", "P17"}),
     "c6": frozenset({"P800"}),
 }
 _GROUNDED_STATUS: dict[str, ClaimStatus] = {
-    "c1": ClaimStatus.RETRIEVED,
-    "c2": ClaimStatus.RETRIEVED,
-    "c4": ClaimStatus.REASONED_SUPPORTABLE,
-    "c5": ClaimStatus.REASONED_SUPPORTABLE,
+    "c1": ClaimStatus.RETRIEVED, "c2": ClaimStatus.RETRIEVED, "c3": ClaimStatus.RETRIEVED,
+    "c4": ClaimStatus.REASONED_SUPPORTABLE, "c5": ClaimStatus.REASONED_SUPPORTABLE,
     "c6": ClaimStatus.RETRIEVED,
 }
 
 
-def _date_injected(injected: list[dict] | None) -> bool:
-    return any("date" in (inj.get("relation") or "").lower() for inj in (injected or []))
+def _triple_key(e: dict) -> str:
+    """Evidence key for a triplet edit (the date maps to DOB_KEY)."""
+    if e.get("id"):
+        return e["id"]
+    rel = (e.get("relation") or "").lower()
+    return DOB_KEY if "date" in rel else (e.get("relation") or "triple")
 
 
-def statuses_for_graph(
-    present: list[str] | None = None, injected: list[dict] | None = None
-) -> dict[str, ClaimStatus]:
-    """Re-verify the claims given the triples currently in the graph + injections.
+def apply_edits(edits: list[dict] | None) -> dict:
+    """Fold the edit list into generation + verification views (deterministic).
 
-    A structural claim grounds iff all its required triples are present; c3 (the
-    date) grounds iff a 'date of birth' triple has been injected. Grading is always
-    against the full reference — what changes is the model's regenerated answer
-    under the edited graph.
+    Returns the evidence sets seen by the generator vs the verifier, plus display
+    bookkeeping (added triples/entities, per-entity content state).
     """
-    pres = set(present if present is not None else ALL_TRIPLE_IDS)
-    out: dict[str, ClaimStatus] = {}
-    for cid in ("c1", "c2", "c3", "c4", "c5", "c6"):
-        if cid == "c3":
-            out[cid] = ClaimStatus.RETRIEVED if _date_injected(injected) else ClaimStatus.FABRICATED
-        else:
-            out[cid] = (
-                _GROUNDED_STATUS[cid] if CLAIM_COVERAGE[cid] <= pres else ClaimStatus.FABRICATED
-            )
-    return out
+    gen: set[str] = set(ALL_TRIPLE_IDS)
+    ver: set[str] = set(ALL_TRIPLE_IDS)
+    content_state: dict[str, str] = {}  # entity -> "gen" (withheld) | "both" (removed)
+    added_triples: list[dict] = []
+    added_entities: list[dict] = []
+    for e in edits or []:
+        op, kind, scope = e.get("op"), e.get("kind"), e.get("scope", "both")
+        if kind == "triplet":
+            key = _triple_key(e)
+            if op == "remove":
+                gen.discard(key)
+                if scope == "both":
+                    ver.discard(key)
+            else:
+                gen.add(key)
+                if scope == "both":
+                    ver.add(key)
+                added_triples.append({**e, "key": key})
+        elif kind == "content" and op == "remove":
+            ent = e.get("id")
+            if ent:  # "both" supersedes a prior "gen" removal
+                content_state[ent] = "both" if scope == "both" else content_state.get(ent, "gen")
+        elif kind == "entity" and op == "add":
+            added_entities.append(e)
+    return {
+        "gen": gen, "ver": ver, "content_state": content_state,
+        "added_triples": added_triples, "added_entities": added_entities,
+    }
 
 
-def grounded_count(present: list[str] | None = None, injected: list[dict] | None = None) -> int:
+def _status_and_reason(
+    deps: frozenset[str], gen: set[str], ver: set[str], grounded: ClaimStatus
+) -> tuple[ClaimStatus, str]:
+    in_gen, in_ver = deps <= gen, deps <= ver
+    if in_gen and in_ver:
+        return grounded, "grounded"
+    if in_ver and not in_gen:
+        return ClaimStatus.FABRICATED, (
+            "absence-induced: evidence withheld from the model, but the verifier "
+            "still holds it (a wrong claim would be caught)"
+        )
+    if in_gen and not in_ver:
+        return ClaimStatus.FABRICATED, (
+            "unverifiable: the model states it, but the verifier's reference no "
+            "longer holds it (the verifier is blinded)"
+        )
+    return ClaimStatus.FABRICATED, "fabricated: evidence absent from generation and verification"
+
+
+def statuses_with_reasons(edits: list[dict] | None = None) -> dict[str, tuple[ClaimStatus, str]]:
+    """Per-claim (status, reason) given the scoped edits (§4.4)."""
+    st = apply_edits(edits)
+    gen, ver = st["gen"], st["ver"]
+    return {
+        cid: _status_and_reason(deps, gen, ver, _GROUNDED_STATUS[cid])
+        for cid, deps in CLAIM_DEPS.items()
+    }
+
+
+def statuses_for_graph(edits: list[dict] | None = None) -> dict[str, ClaimStatus]:
+    """Re-verify the claims given the scoped edits (status only)."""
+    return {cid: sr[0] for cid, sr in statuses_with_reasons(edits).items()}
+
+
+def grounded_count(edits: list[dict] | None = None) -> int:
     """How many of the 6 claims currently ground (not Fabricated)."""
-    return sum(
-        1 for s in statuses_for_graph(present, injected).values() if s != ClaimStatus.FABRICATED
-    )
+    return sum(1 for s in statuses_for_graph(edits).values() if s != ClaimStatus.FABRICATED)
 
 
-def repair_result(
-    present: list[str] | None = None, injected: list[dict] | None = None
-) -> RepairResult:
+def repair_result(edits: list[dict] | None = None) -> RepairResult:
     """Repair-leverage: claims that flip FABRICATED -> grounded vs the original answer.
 
-    Baseline = the original full-graph answer (all triples present, nothing
-    injected): only the date claim (c3) is fabricated there. `repair_leverage` is
-    the COUNT of those baseline-fabricated claims now grounded after the analyst's
-    edit-the-KG restore + re-run (aligned by claim_id within this before/after).
+    Baseline = the original answer (no edits): only the date claim (c3) is
+    fabricated (the date is a gap). A *generation+verification* add of the date
+    grounds c3 (+1); a *generation-only* add does NOT repair it (the verifier still
+    cannot confirm it -- it stays fabricated/unverifiable). That contrast is the
+    point of the scope toggle.
     """
-    baseline = statuses_for_graph(ALL_TRIPLE_IDS, [])
-    current = statuses_for_graph(present, injected)
+    baseline = statuses_for_graph(None)
+    current = statuses_for_graph(edits)
     repaired = [
         cid for cid, st in current.items()
         if baseline.get(cid) == ClaimStatus.FABRICATED and st != ClaimStatus.FABRICATED
     ]
-    injs = injected or []
-    if injs:
-        restored = "; ".join(
-            f"{i.get('relation', '?')} = {i.get('value', '?')}" for i in injs
-        )
-    else:
-        restored = "(no KG additions yet)"
+    adds = [e for e in (edits or []) if e.get("op") == "add"]
+    restored = "; ".join(
+        f"{e.get('relation') or e.get('label', '?')}"
+        f"{' = ' + e['value'] if e.get('value') else ''}"
+        f" [{SCOPE_LABELS.get(e.get('scope', 'both'), e.get('scope'))}]"
+        for e in adds
+    ) or "(no KG additions yet)"
     return RepairResult(
-        restored_item=restored,
-        repair_leverage=len(repaired),
-        repaired_claim_ids=repaired,
+        restored_item=restored, repair_leverage=len(repaired), repaired_claim_ids=repaired,
     )
 
 
-def removed_triples(present: list[str] | None) -> list[dict]:
-    """The triples currently withheld from the graph (for the re-add list)."""
-    pres = set(present if present is not None else ALL_TRIPLE_IDS)
-    return [t for t in TRIPLES if t["id"] not in pres]
+def removed_triples(edits: list[dict] | None = None) -> list[dict]:
+    """Base triples currently withheld from the GENERATION context (for re-add)."""
+    gen = apply_edits(edits)["gen"]
+    return [t for t in TRIPLES if t["id"] not in gen]
 
 
-def editable_snapshot(
-    present: list[str] | None = None, injected: list[dict] | None = None
-) -> KGSnapshot:
-    """A KGSnapshot containing only the present triples (+ injected triples)."""
-    pres = set(present if present is not None else ALL_TRIPLE_IDS)
+def editable_snapshot(edits: list[dict] | None = None) -> tuple[KGSnapshot, dict, dict]:
+    """KGSnapshot for the edited KG + (edge scope_state map, node content_state map).
+
+    Shows the union of generation- and verification-visible triples so that
+    generation-only edits stay visible (styled distinctly), plus any added
+    entities. scope_state per edge: "both" | "ver_only" (withheld from the model) |
+    "gen_only" (model-only, unverified).
+    """
+    st = apply_edits(edits)
+    gen, ver, content_state = st["gen"], st["ver"], st["content_state"]
     edges: list[KGEdge] = []
-    node_ids: set[str] = {FCHOPIN}  # always show the domain entity
+    edge_scope: dict[str, str] = {}
+    node_ids: set[str] = {FCHOPIN}
+
+    def _scope_state(key: str) -> str | None:
+        in_g, in_v = key in gen, key in ver
+        if in_g and in_v:
+            return "both"
+        if in_v and not in_g:
+            return "ver_only"
+        if in_g and not in_v:
+            return "gen_only"
+        return None  # gone from both -> not shown
+
     for t in TRIPLES:
-        if t["id"] not in pres:
+        state = _scope_state(t["id"])
+        if state is None:
             continue
-        node_ids.add(t["subj"])
-        if not t["literal"]:
-            node_ids.add(t["obj"])
+        node_ids.update({t["subj"], t["obj"]})
         edges.append(KGEdge(
             subject_id=t["subj"], property_id=t["id"], property_label=t["prop_label"],
-            object_id=None if t["literal"] else t["obj"], object_label=t["obj_label"],
-            value_type=ValueType.TIME if t["literal"] else ValueType.ITEM,
+            object_id=t["obj"], object_label=t["obj_label"], value_type=ValueType.ITEM,
         ))
-    for inj in injected or []:
-        subj = inj.get("subject") or NCHOPIN
+        edge_scope[f"{t['subj']}-{t['id']}-{t['obj']}"] = state
+
+    for e in st["added_triples"]:
+        subj = e.get("subject") or NCHOPIN
         node_ids.add(subj)
+        pid = e.get("key", "INJ")
+        val = e.get("value", "")
+        lit_id = f"lit:string:{val}"
         edges.append(KGEdge(
-            subject_id=subj, property_id="INJ", property_label=inj.get("relation", "injected"),
-            object_id=None, object_label=inj.get("value", ""), value_type=ValueType.STRING,
+            subject_id=subj, property_id=pid, property_label=e.get("relation", "added"),
+            object_id=None, object_label=val, value_type=ValueType.STRING,
         ))
-    nodes = [
-        KGNode(id=q, label=_NODE_LABELS.get(q, q), description=_NODE_DESCRIPTIONS.get(q))
-        for q in _NODE_LABELS
-        if q in node_ids
-    ]
-    return KGSnapshot(snapshot_id="chopin-edit", slice="books", domain_qid=FCHOPIN,
-                      nodes=nodes, edges=edges, meta={})
+        edge_scope[f"{subj}-{pid}-{lit_id}"] = "both" if e.get("scope") == "both" else "gen_only"
+
+    nodes: list[KGNode] = []
+    for q in _NODE_LABELS:
+        if q not in node_ids:
+            continue
+        # content (description) is dropped when removed from the true KG ("both");
+        # a generation-only content removal keeps it in the reference (still shown).
+        desc = None if content_state.get(q) == "both" else _NODE_DESCRIPTIONS.get(q)
+        nodes.append(KGNode(id=q, label=_NODE_LABELS[q], description=desc))
+    for e in st["added_entities"]:
+        eid = e.get("id") or e.get("label", "new-entity")
+        nodes.append(KGNode(id=eid, label=e.get("label", eid), description=e.get("description")))
+    return (
+        KGSnapshot(snapshot_id="chopin-edit", slice="books", domain_qid=FCHOPIN,
+                   nodes=nodes, edges=edges, meta={}),
+        edge_scope,
+        content_state,
+    )
 
 
-def editable_elements(
-    present: list[str] | None = None, injected: list[dict] | None = None
-) -> list[dict]:
-    """Cytoscape elements for the current edited graph; injected edges are tagged."""
-    els = nx_to_cyto_elements(editable_snapshot(present, injected))
-    for e in els:
-        if e["data"].get("property_id") == "INJ":
-            e["data"]["injected"] = "1"
+def editable_elements(edits: list[dict] | None = None) -> list[dict]:
+    """Cytoscape elements for the edited KG; edges/nodes tagged with scope state."""
+    snap, edge_scope, content_state = editable_snapshot(edits)
+    added_entity_ids = {
+        (e.get("id") or e.get("label")) for e in apply_edits(edits)["added_entities"]
+    }
+    els = nx_to_cyto_elements(snap)
+    for el in els:
+        data = el["data"]
+        if "source" in data:  # edge
+            data["scope_state"] = edge_scope.get(data["id"], "both")
+        else:  # node
+            if data["id"] in content_state:
+                data["content_state"] = content_state[data["id"]]
+            if data["id"] in added_entity_ids:
+                data["added"] = "1"
     return els
 
 

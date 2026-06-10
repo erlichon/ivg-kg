@@ -166,6 +166,28 @@ def _shift_row(condition_diags: dict[str, AnswerDiagnostics], selected: str) -> 
     )
 
 
+def _support_frequency_list(support_frequency: dict[str, float], labels: dict[str, str]) -> html.Div:
+    """Clickable ranked list of KG items; clicking highlights the item on the subgraph."""
+    items = sorted(support_frequency.items(), key=lambda kv: kv[1], reverse=True)
+    rows = [
+        html.Button(
+            [
+                html.Span("◆ " if "|" in item else "● ",
+                          style={"color": theme.ACCENT if "|" in item else theme.MUTED}),
+                html.Span(labels.get(item, item), style={"color": theme.TEXT}),
+                html.Span(f"  {freq:.0%}", style={"color": theme.MUTED}),
+            ],
+            id={"type": "kg-item", "item": item}, n_clicks=0,
+            style={"display": "block", "width": "100%", "textAlign": "left",
+                   "background": theme.PANEL_ALT, "border": f"1px solid {theme.BORDER}",
+                   "borderRadius": "4px", "padding": "3px 8px", "marginBottom": "3px",
+                   "cursor": "pointer", "fontFamily": theme.MONO, "fontSize": "0.72em"},
+        )
+        for item, freq in items
+    ]
+    return html.Div(rows)
+
+
 def multi_run_body(
     diag: AnswerDiagnostics,
     condition_diags: dict[str, AnswerDiagnostics],
@@ -187,11 +209,13 @@ def multi_run_body(
         ),
         _shift_row(condition_diags, condition),
         html.Div(
-            ["support-frequency — sized on the subgraph too (observational, not causal)",
+            ["support-frequency — click an item to highlight it on the subgraph; "
+             "node-size / edge-weight encode it too (observational, not causal)",
              theme.info_icon(_INFO_SUPPORTFREQ)],
             style={"color": theme.FAINT, "fontSize": "0.7em", "marginTop": "6px",
                    "marginBottom": "2px"},
         ),
+        _support_frequency_list(diag.support_frequency, labels),
         dcc.Graph(
             figure=make_support_frequency_figure(diag.support_frequency, labels),
             config={"displayModeBar": False},

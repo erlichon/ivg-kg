@@ -213,13 +213,15 @@ def test_status_distribution_error_bars_are_proportion_se():
 def test_graph_editor_panel_and_callbacks():
     from app.panels.repair import get_repair_panel, render_repair_body
 
-    assert get_repair_panel() is not None
-    # body renders for an edited graph (one triple removed) -> re-add appears
-    body = str(render_repair_body([t for t in fx.ALL_TRIPLE_IDS if t != "P22"], []))
-    assert "grounded" in body and "re-add" in body
+    panel = str(get_repair_panel())
+    assert "edit-scope" in panel and "entity-apply" in panel  # scope toggle + add-entity
+    # body renders for a scoped edit (remove P22) -> re-add + repair-leverage appear
+    body = str(render_repair_body([{"op": "remove", "kind": "triplet", "scope": "both",
+                                    "id": "P22"}]))
+    assert "re-add" in body and "repair-leverage" in body
     app = make_app()
-    # each editable-graph store written by exactly one callback (no circular)
-    assert sum(1 for k in app.callback_map if "present-triples.data" in k) == 1
-    assert sum(1 for k in app.callback_map if "injected.data" in k) == 1
+    # the single KG-edits log + KG-item selection are each written by one callback
+    assert sum(1 for k in app.callback_map if "kg-edits.data" in k) == 1
+    assert sum(1 for k in app.callback_map if "selected-kg-items.data" in k) == 1
     assert sum(1 for k in app.callback_map if "repair-body.children" in k) == 1
     assert sum(1 for k in app.callback_map if "answer-spans.children" in k) == 1

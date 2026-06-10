@@ -51,15 +51,20 @@ def test_both_supportable_variants_and_value_mismatch_present():
     assert fx.DOB_FALSE in fab.text and fab.support_source == SupportSource.NONE
 
 
-def test_subgraph_elements_have_literal_node_and_referential_integrity():
+def test_subgraph_elements_referential_integrity_and_date_is_a_gap():
     els = fx.mock_subgraph_elements()
     nodes = {e["data"]["id"] for e in els if "source" not in e["data"]}
-    literals = [e for e in els if e["data"].get("kind") == "literal"]
-    assert literals, "expected a distinctly-typed literal node (the date of birth)"
-    assert any("15 April 1771" in e["data"]["id"] for e in literals)
+    # the date is a GAP at baseline -> no literal date node yet
+    assert not any(e["data"].get("kind") == "literal" for e in els)
     for e in els:
         if "source" in e["data"]:
             assert e["data"]["source"] in nodes and e["data"]["target"] in nodes
+    # adding the date (generation+verification) introduces the distinct literal node
+    edits = [{"op": "add", "kind": "triplet", "scope": "both",
+              "subject": fx.NCHOPIN, "relation": "date of birth", "value": "15 April 1771"}]
+    added = fx.editable_elements(edits)
+    literals = [e for e in added if e["data"].get("kind") == "literal"]
+    assert literals and any("15 April 1771" in e["data"]["id"] for e in literals)
 
 
 # --- single-run (no SE) ----------------------------------------------------
@@ -151,31 +156,55 @@ def test_single_run_summary_matches_helper():
     )
 
 
-# --- edit-the-KG + repair-leverage -----------------------------------------
-def test_graph_editor_logic():
-    # full graph: 5 grounded (c3 = date fabricated until a date-of-birth triple is injected)
-    assert fx.grounded_count(fx.ALL_TRIPLE_IDS, []) == 5
-    # remove the father triple (P22) -> c1 (and c5, which needs P22) fabricate
-    without_p22 = [t for t in fx.ALL_TRIPLE_IDS if t != "P22"]
-    s = fx.statuses_for_graph(without_p22, [])
+# --- scoped KG edits (gen-only vs gen+verification) ------------------------
+def _rm(tid, scope):
+    return {"op": "remove", "kind": "triplet", "scope": scope, "id": tid}
+
+
+def _add_date(scope):
+    return {"op": "add", "kind": "triplet", "scope": scope,
+            "subject": fx.NCHOPIN, "relation": "date of birth", "value": "15 April 1771"}
+
+
+def test_baseline_and_structure_removal():
+    # baseline: 5 grounded (c3 = date is a gap), no edits
+    assert fx.grounded_count([]) == 5
+    # remove the father triple (P22) generation+verification -> c1 and c5 fabricate
+    s = fx.statuses_for_graph([_rm("P22", "both")])
     assert s["c1"].value == "fabricated" and s["c5"].value == "fabricated"
     assert s["c2"].value != "fabricated"  # P19 still present
-    # injecting an (editable) date-of-birth triple grounds the date claim c3
-    inj = [{"subject": fx.NCHOPIN, "relation": "date of birth", "value": "15 April 1771"}]
-    assert fx.statuses_for_graph(fx.ALL_TRIPLE_IDS, inj)["c3"].value == "retrieved"
-    # editable elements: the removed triple's edge is gone; the injected edge is tagged
-    edges = [e for e in fx.editable_elements(without_p22, inj) if "source" in e["data"]]
-    assert "P22" not in {e["data"].get("property_id") for e in edges}
-    assert any(e["data"].get("injected") == "1" for e in edges)
-    assert [t["id"] for t in fx.removed_triples(without_p22)] == ["P22"]
+    # the withheld base triple is listed for re-add; its edge is tagged ver_only on a
+    # generation-only removal (still in the verifier's reference)
+    assert [t["id"] for t in fx.removed_triples([_rm("P22", "gen")])] == ["P22"]
+    edges = [e for e in fx.editable_elements([_rm("P22", "gen")]) if "source" in e["data"]]
+    p22 = next(e for e in edges if e["data"].get("property_id") == "P22")
+    assert p22["data"].get("scope_state") == "ver_only"
 
 
-def test_repair_leverage_counts_fabricated_to_grounded_flips():
-    # baseline (original answer): only the date claim c3 is fabricated -> leverage 0
-    base = fx.repair_result(fx.ALL_TRIPLE_IDS, [])
-    assert isinstance(base, RepairResult)
-    assert base.repair_leverage == 0
-    # inject the curated date -> c3 flips fabricated->grounded -> leverage +1
-    inj = [{"subject": fx.NCHOPIN, "relation": "date of birth", "value": "15 April 1771"}]
-    rr = fx.repair_result(fx.ALL_TRIPLE_IDS, inj)
+def test_scope_distinguishes_generation_only_from_verification():
+    # generation-only ADD of the date: model states it, but the verifier cannot
+    # confirm it -> c3 stays fabricated (unverifiable); no repair.
+    gen = fx.statuses_with_reasons([_add_date("gen")])
+    assert gen["c3"][0].value == "fabricated" and "unverifiable" in gen["c3"][1]
+    assert fx.repair_result([_add_date("gen")]).repair_leverage == 0
+    # generation+verification ADD: grading uses the edited reference -> c3 grounds (+1)
+    both = fx.statuses_for_graph([_add_date("both")])
+    assert both["c3"].value == "retrieved"
+    rr = fx.repair_result([_add_date("both")])
+    assert isinstance(rr, RepairResult)
     assert rr.repair_leverage == 1 and rr.repaired_claim_ids == ["c3"]
+    # generation-only REMOVE is absence-induced (verifier retains the truth)
+    assert "absence-induced" in fx.statuses_with_reasons([_rm("P19", "gen")])["c2"][1]
+
+
+def test_entity_content_removal_and_add():
+    # removing an entity's content (both) clears its description but keeps the node + triplets
+    cc = [{"op": "remove", "kind": "content", "scope": "both", "id": fx.NCHOPIN}]
+    els = fx.editable_elements(cc)
+    nic = next(e for e in els if e["data"].get("id") == fx.NCHOPIN)
+    assert nic["data"].get("content_state") == "both" and "description" not in nic["data"]
+    assert any(e["data"].get("property_id") == "P19" for e in els)  # triplets intact
+    # adding an entity (optional description) creates a new node
+    add = [{"op": "add", "kind": "entity", "scope": "both", "id": "new:Q-x",
+            "label": "Test Entity", "description": "a mock entity"}]
+    assert any(e["data"].get("id") == "new:Q-x" for e in fx.editable_elements(add))
