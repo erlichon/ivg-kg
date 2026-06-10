@@ -25,7 +25,7 @@ independent units producing separate artifacts, or read-only → **Workflow** (p
 
 | Phase / task | Mechanism | Why |
 | --- | --- | --- |
-| **All code build** — S1–S2, DA1–DA4, PT1, UI1–UI5, GR1, GR3–GR11, TS1–TS2, EX3, authoring EX1/EX2 | **subagent-driven-development** | coupled multi-file package; needs interactive clarification, file-safe sequential commits, human P0/M-BOOKS gates. Never parallel-dispatch implementers. |
+| **All code build** — S1–S2, DA1–DA4, PT1, UI1–UI5, GR1, GR3–GR11, TS1–TS2, EX3, EX5, authoring EX1/EX2 | **subagent-driven-development** | coupled multi-file package; needs interactive clarification, file-safe sequential commits, human P0/M-BOOKS gates. Never parallel-dispatch implementers. |
 | **Experiment sweep — running EX4** | **Workflow** `pipeline()` | grounding *(question × manifest-entry)* is embarrassingly parallel; each run writes its own `data/runs/<id>.json`; resumable. The sweep *code* (GR11) is built by the skill; the *run* is the Workflow. |
 | **Phase-boundary review panels** — P0 gate, M-BOOKS, final | **Workflow** (optional) | fan out parallel Opus reviewers (architecture ‖ simplicity ‖ alignment ‖ correctness) → synthesize. Read-only. |
 | **Per-task review checkpoint** | **skill loop (below)** | implement→review→fix mutates the same files → sequential. |
@@ -60,7 +60,8 @@ Not applied uniformly — that would review scaffold as hard as the entailment g
 - **Tier 1 — full adversarial loop (≤4 rounds):** **S2** (schema), **DA4** (grading reference),
   **PT1** (withhold semantics), **GR3** (the only place ablation happens), **GR7** (value-sensitive
   entailment), **GR8** (classifier), **GR9** (grade-against-reference wiring), **GR10**, **TS1**,
-  **TS2**, **EX3** (deterministic leverage), **EX4** (the §6 controls must *pass*).
+  **TS2**, **EX3** (deterministic repair-leverage), **EX5** (diagnostics: stability / absence-leverage
+  / spurious-path semantics), **EX4** (the §6 controls must *pass*).
 - **Tier 2 — single Opus review, fix-and-confirm if must-fix:** DA1, DA2, DA3, GR1, GR4, GR5, GR6,
   GR11, UI2, UI3, EX1, EX2.
 - **Tier 3 — light single pass (Invariants + acceptance):** S1, UI1, UI4 charts, UI5.
@@ -104,6 +105,17 @@ Non-obvious load-bearing decisions a cold agent will otherwise violate (from `SP
 11. **UI correctness (SPEC-text §4.5).** Highlight the support path by **appending** stylesheet
     selectors — **never mutate the global stylesheet**. Panels read `dcc.Store` independently (**no
     circular callbacks**); `modified_timestamp` for initial-load reads.
+12. **Encoding (SPEC-text §4.5).** **Hue encodes STATUS** — one fixed 3-grade palette
+    (Retrieved / Supportable / Fabricated; long term `reasoned-supportable`) used identically in every
+    panel. Multiple selected claims are distinguished by **outline + numeric badge, never by hue**.
+    The status filter is over the **three grades**; "proposed" is the input universe, not a fourth grade.
+13. **Two leverage metrics, never conflated (SPEC-text §4.6/§4.8).** `repair_leverage` =
+    deterministic count of claims flipping FABRICATED→grounded when a restored item is *added back*
+    (RQ3, EX3). `absence_leverage` = probabilistic per-claim P(grounded|FULL)−P(grounded|absent_m)
+    over N draws when a modality is *withheld* (RQ2, EX5). Diagnostics align claims across the RunSet
+    by **`claim_key`**; a claim absent from a draw is status **`absent`** (≠ `fabricated`).
+    Classification is **deterministic given a fixed answer text**; **reported figures come from frozen
+    scenarios**, live N-generation is opt-in and never the source of reported numbers.
 
 ### Brief templates
 **Implementer (Sonnet 4.6):** paste the task entry + the exact SPEC-text excerpts it cites +
@@ -150,9 +162,12 @@ image axis is curtailed (artwork→taxa→drop) to protect the demo + write-up.
   endpoints), CI lint+tests. *SPEC:* §3.3, §7, §9(P0-a).
 - **S2 — Typed schema `schema.py`** · P0 · deps: S1
   *Delivers:* all pydantic v2 contracts in SPEC-text §4.2 — **the full multimodal-ready schema**
-  (enums incl. Modality/SupportSource, KG shape incl. `image_path`, `GradingReference`,
-  `GenerationContext`, `GroundingConfig`, per-claim log, `GroundingRun`); JSON round-trip test.
-  Image fields exist but are unexercised by the text build. **Central contract.** *SPEC:* §4.2.
+  (enums incl. Modality/SupportSource/**Condition**, KG shape incl. `image_path`, `GradingReference`,
+  `GenerationContext`, `GroundingConfig`, per-claim log with **`claim_key` + `spurious_reason`**,
+  `GroundingRun` with **`condition`/`sample_index`**, and the **`ClaimDiagnostics`/`AnswerDiagnostics`**
+  aggregates); JSON round-trip test. Image/diagnostics fields exist but the diagnostics aggregates are
+  populated in P2 (EX5); the text build leaves image fields unexercised. **Central contract.**
+  *SPEC:* §4.2, §4.8.
 
 ### DATA (books)
 - **DA1 — Wikidata pull client `wikidata.py`** · P0 · deps: S1
@@ -182,19 +197,29 @@ image axis is curtailed (artwork→taxa→drop) to protect the demo + write-up.
 - **UI2 — Dash three-panel skeleton** · P0 · deps: S2, UI1, PT1
   *Delivers:* `app/{app,layout,callbacks}.py` + `app/panels/{answer,subgraph,analytics}.py` (one
   `get_*_panel()` each); `dcc.Store(selected_claim)`; CB1 click→store, CB2 store→cytoscape path
-  highlight, CB3 store→analytics; **controls from the perturbation registry**; **entity-detail pane
-  shows the entity image when present** (P18; demo-visual even though not evidence — books covers /
-  author images); fed by mock; **P0 grounding stub** (`backend.ground_response` raises
-  `NotImplementedError`). *SPEC:* §4.5, §3.1(seam 3).
+  highlight, CB3 store→analytics; **status filter over the three grades** (#1) and **multi-claim
+  select with outline+badge** (#2); **hue=status, identity=outline+badge** (never overload hue);
+  **controls from the perturbation registry**; subgraph shows **1st-degree neighbourhood under a node
+  cap** (#3/#8) and **node-tap → zoom + entity-detail bottom pane showing the entity image when
+  present** (#7) (P18; demo-visual even though not evidence — book covers / author images); fed by
+  mock; **P0 grounding stub** (`backend.ground_response` raises `NotImplementedError`).
+  *SPEC:* §4.5, §3.1(seam 3).
 - **UI3 — Wire app to precomputed runs** · P1 · deps: UI2, GR11
   *Delivers:* app loads `data/runs/*.json`; question/condition selector. *SPEC:* §8, §4.5.
-- **UI4 — Analytics panel (full) + Trust indicator** · P2 · deps: UI3, EX4, EX3
-  *Delivers:* `app/charts/{status_dist,repair_history,coverage}.py` (one `make_*_figure()` each) —
-  claim-status distributions, modality-coverage, repair-history + **leverage**; **a Trust-pillar
-  indicator rendering `GroundingRun.error_rates`** (per-modality classifier error, always visible);
-  bars start at y=0; node sizing by area. *SPEC:* §4.5, §4.6, §4.7.
-- **UI5 — Repair-loop UI (CB4)** · P2 · deps: UI3, EX3
-  *Delivers:* spot-fabricated→restore-evidence→regenerate→diff; the single live call. *SPEC:* §4.5, §4.6.
+- **UI4 — Analytics panel (full) + per-claim diagnostics + Trust indicator** · P2 · deps: UI3, EX4, EX3, EX5
+  *Delivers:* `app/charts/{status_dist,repair_history,coverage,claim_diagnostics}.py` (one
+  `make_*_figure()` each). **Full-answer (#5):** claim-status **distribution column chart** +
+  **fabrication rate** over **N generations** with an **N selector**; modality-coverage;
+  repair-history + **repair-leverage**. **Per-claim (#4/#6, on claim click):** the **per-condition
+  stacked-bar small-multiple** from `ClaimDiagnostics.status_by_condition`, the **stability** scalar
+  ("retrieved 9/10"), and the **`spurious_path` warning chip + reason** (Supportable claims only).
+  **Trust-pillar indicator** rendering `GroundingRun.error_rates` (per-modality classifier error,
+  always visible). Bars start at y=0; node sizing by area. *SPEC:* §4.5, §4.6, §4.7, §4.8.
+- **UI5 — Repair-loop UI (CB4) + live N-generation** · P2 · deps: UI3, EX3
+  *Delivers:* spot-fabricated→restore-evidence→regenerate→diff (the repair live call); **plus the
+  optional live N-generation path for a new question** (bulk N×conditions, display FULL draw #0,
+  aggregate to diagnostics) — gated behind a control, with a "minutes" cost notice; the canned demo
+  uses frozen scenarios. *SPEC:* §4.5, §4.6.
 
 ### GROUND (text/structure)
 - **GR1 — LLM client abstraction `clients/`** · P1 · deps: S2
@@ -220,7 +245,9 @@ image axis is curtailed (artwork→taxa→drop) to protect the demo + write-up.
 - **GR8 — Classifier `classify.py`** · P1 · deps: S2, DA2, GR6, GR7
   *Delivers:* decision order (direct triple → content fact → **undirected** multi-hop path →
   fabricated); `all_simple_paths`, **literal-node exclusion**, **max-entailment** path; sets
-  `status` + `support_source` + `spurious_path`. *SPEC:* §4.3(C).
+  `status` + `support_source` + **`claim_key`** (canonical head+relation+normalized-value) +
+  **`spurious_path` + `spurious_reason`** via the §4.8 detectors (1) relation/value illegitimacy and
+  (2) hub/length fragility. *SPEC:* §4.3(C), §4.8.
 - **GR9 — Grounding backend `backend.py` (real)** · P1 · deps: GR3, GR5, GR6, GR8, DA4
   *Delivers:* `ground_response(answer, reference, …)` wiring extract→link→classify into a
   `GroundingRun`, grading against the **reference (never the ablated context)**; replaces the P0
@@ -230,8 +257,9 @@ image axis is curtailed (artwork→taxa→drop) to protect the demo + write-up.
   books sample; **`tau`/`k` tuned on a disjoint fold**. *(Image/label error is in the image axis.)*
   *SPEC:* §4.7.
 - **GR11 — Precompute pipeline + runs store** · P1 · deps: GR4, GR9
-  *Delivers:* batch script: (question × {full, manifest entry}) assemble→generate→ground →
-  `data/runs/<run_id>.json`; deterministic, cached. *SPEC:* §8, §10.
+  *Delivers:* batch script: (question × {full, manifest entry} × **N draws**) assemble→generate→ground
+  → `data/runs/<run_id>.json` (a **RunSet** per question; `condition`/`sample_index` set); cached by
+  input hash; deterministic given fixed answer texts. *SPEC:* §8, §10, §4.8.
 
 ### TEST
 - **TS1 — §6 mechanical tests (P0 subset)** · P0 · deps: S2, DA1, PT1
@@ -250,9 +278,18 @@ image axis is curtailed (artwork→taxa→drop) to protect the demo + write-up.
 - **EX2 — Ablation manifests (books) · Phase A** · P2 · deps: PT1, DA3
   *Delivers:* fixed `manifest.json` — text-content-absence + knowledge-absence; fixed before
   inspection. *SPEC:* §4.4, §5.1.
-- **EX3 — Repair loop + leverage `RepairSession`** · P2 · deps: GR9, GR3
-  *Delivers:* restore withheld evidence → re-ground; **deterministic** leverage (fabricated→grounded
-  per atomic restore, aligned by `claim_id`); live-regen secondary (temp 0, N runs ±CI). *SPEC:* §4.6.
+- **EX3 — Repair loop + repair-leverage `RepairSession`** · P2 · deps: GR9, GR3
+  *Delivers:* restore withheld evidence → re-ground; **deterministic `repair_leverage`**
+  (fabricated→grounded per atomic restore, aligned by `claim_id`); live-regen secondary (temp 0, N
+  runs ±CI). **Distinct from EX5 `absence_leverage`** (add-back-count vs withhold-drop — §4.6).
+  *SPEC:* §4.6.
+- **EX5 — Diagnostics aggregation `diagnostics.py`** · P2 · deps: GR11
+  *Delivers:* aggregate a RunSet (N draws × conditions) into `ClaimDiagnostics`/`AnswerDiagnostics`
+  (§4.8): group by **`claim_key`** (absent-claim ⇒ status `absent`, ≠ fabricated); compute
+  **stability** (FULL-condition status entropy + modal fraction), **`status_by_condition`** (the
+  stacked-bar small-multiple), **`absence_leverage`** and **`fabrication_induction`** per modality,
+  and carry the per-claim **`spurious_path`/reason**; full-answer **status distribution +
+  fabrication rate** over the N FULL draws. *SPEC:* §4.8.
 - **EX4 — Phase A BOOKS runs + controls + pilot (= M-BOOKS)** · P2 · deps: GR11, GR10, TS2, EX1, EX2
   *Delivers:* run precompute over books bank×manifests; **negative / false-claim / manipulation /
   modality-strength controls** on real data; empirical pilot (~10 q); per-slice claim-status
@@ -284,7 +321,7 @@ S1 ──► S2 ─────────────────────�
  ├─► DA1 ─► DA2 ─► DA3 ─► EX1, EX2                     │
  │            └─► DA4 ─► GR3 ─► GR4, GR9               │
 GR3,GR5,GR6,GR8,DA4 ─► GR9 ─► GR10, GR11, TS2, EX3    │
-GR11 ─► UI3 ─► UI4, UI5 ;  EX3 ─► UI4, UI5            │
+GR11 ─► UI3 ─► UI4, UI5 ; GR11 ─► EX5 ─► UI4 ; EX3 ─► UI4, UI5   │
 GR10, TS2, EX1, EX2, GR11 ─► EX4 (= M-BOOKS) ─► UI4, EX6
 RES1 (independent)                                    ┘
          ═══ after M-BOOKS: open TASKS-image-artwork.md (then -taxa fallback) ═══
@@ -296,7 +333,7 @@ RES1 (independent)                                    ┘
 - **Wave 2:** GR1 ‖ PT1 ‖ UI1 ‖ GR7 ‖ GR5 ‖ DA2.
 - **Wave 3:** DA3 ‖ DA4 ‖ GR6 ‖ GR3 ‖ UI2 ‖ TS1.  → **P0 closes** when {S1,S2,DA1,DA2,DA3,DA4,PT1,UI1,UI2,TS1} done — **review gate**.
 - **Wave 4 (P1):** GR4 ‖ GR8 → GR9 → {GR10 ‖ GR11 ‖ TS2}.  *(GR4 needs GR3 from Wave 3.)*
-- **Wave 5:** UI3 ‖ EX1 ‖ EX2 ‖ EX3.
+- **Wave 5:** UI3 ‖ EX1 ‖ EX2 ‖ EX3 ‖ EX5.
 - **Wave 6 (P2):** EX4 (books runs + §6 controls + pilot) → **✦ M-BOOKS ✦** → {UI4 ‖ UI5 ‖ EX6}.
 - **After M-BOOKS (separate files):** the gated image axis — artwork first, taxa fallback.
 

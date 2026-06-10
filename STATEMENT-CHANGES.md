@@ -368,3 +368,50 @@ unified scientific doc.
 **report 2026-06-25**, **presentation 2026-06-27** (verified from the raw instructions; the earlier
 2026-06-14 was the user's personal early target, not a course deadline). The "5-day runway / assume
 image drops" framing is replaced by "gated + curtailable on the ~2-week real runway."
+
+---
+
+## Addendum — visualization / demo / mockup decisions (applied)
+
+Following the team's discussion of the dashboard mockup and interaction set, the decisions below were
+locked with the user and applied. Statement impact is **§6 only, at altitude**; the mechanics live in
+`spec/SPEC-text.md` (§4.2 schema, §4.5 interface, §4.6 repair/live-gen, **new §4.8** diagnostics
+definitions, §8/§10) and `tasks/TASKS.md` (S2, UI2, UI4, UI5, GR8, GR11, **new EX5**, Invariants
+12–13, tiers/graph/waves). No change to the scientific spine.
+
+- **Short status label.** `reasoned-supportable` keeps its full name in prose/contract; the **UI label
+  is "Supportable"** → grades read **Retrieved / Supportable / Fabricated**. (More honest, not less —
+  drops the last cognition connotation.)
+- **Panel naming vs pillars.** Panels stay **functional** (Answer / Subgraph / Analytics); the
+  Worring **Outputs / Process / Knowledge / Trust** pillars are a **cross-cutting lens, not panel
+  labels** (Process = the in-answer verification trace; Trust = the always-visible error strip in
+  Analytics). Corrects an earlier "Process and Trust panel" framing.
+- **Colour encoding.** **Hue = status** (one fixed 3-grade palette, identical in every panel);
+  multiple selected claims distinguished by **outline + numeric badge**, never by hue. (User accepted
+  the recommendation.)
+- **Interaction set (the 8 from the mockup)** specced into §4.5: status filter over the three grades
+  (not "proposed"); multi-claim select/brush; 1st-degree neighbourhood under a node cap; click-claim →
+  per-claim analytics; full-answer status distribution + fabrication rate over **N generations**
+  (N selectable); per-claim diagnostics; node-tap zoom + entity-image detail pane; full-answer
+  Overview subgraph. Mapped to **Yi07** operators on the **Overview → Inspection → Repair** state
+  machine.
+- **Live N-generation (user's call, accepted).** The instrument generates **N draws × conditions live
+  for a new question** and displays FULL draw #0; precompute is **not** a tool limitation. But the
+  **reported figures and on-stage demo run off frozen scenario run-sets** (reproducible, offline;
+  live N-gen is minutes on the local model — too slow for a new on-stage question).
+- **Two distinct "leverage" metrics, named apart:** `repair_leverage` (deterministic add-back count,
+  RQ3) vs `absence_leverage` (probabilistic withhold-drop over N, RQ2). **Stability** (FULL-condition
+  reproducibility) kept separate from leverage.
+- **Pre-claim panel = per-condition stacked-bar small-multiple** (reads off both absence-leverage and
+  fabrication-induction; the vanish-case shows as an `absent` segment) + stability scalar +
+  `spurious_path` warning chip. **`spurious_path`** given explicit detectors (§4.8): relation/value
+  illegitimacy (primary), hub/length fragility, ablation route non-robustness (cross-check).
+- **Claim alignment.** New `claim_key` (canonical head+relation+normalized-value) aligns "the same
+  claim" across the N draws / conditions; a claim absent from a draw is status **`absent`**, not
+  `fabricated`. New schema: `Condition` enum, `claim_key`/`spurious_reason` on `ClaimRecord`,
+  `condition`/`sample_index` on `GroundingRun`, and `ClaimDiagnostics`/`AnswerDiagnostics`.
+
+**Open for the next pass (per the user's plan "then update the .md files accordingly"):** confirm the
+mockup's example shows 2-hop *retrieval* (father's DOB is a direct triple once hopped) — keep a
+genuinely path-only case in the demo to exhibit *Supportable*; node-cap threshold value; the exact
+palette hex.
