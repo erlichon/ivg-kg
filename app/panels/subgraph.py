@@ -15,7 +15,7 @@ from dash import html
 
 from app import theme
 from ivg_kg.config import SUBGRAPH_NODE_CAP
-from ivg_kg.schema import ClaimRecord, ClaimStatus, SupportSource
+from ivg_kg.schema import ClaimRecord, ClaimStatus
 
 PLACEHOLDER_IMG = "/assets/placeholder_entity.svg"
 
@@ -93,8 +93,9 @@ BASE_STYLESHEET: list[dict] = [
 def support_edges_and_nodes(claim: ClaimRecord) -> tuple[list[str], list[str], str | None]:
     """Return (support_edge_ids, support_node_ids, anchor_node_id) for a claim.
 
-    Edge ids follow the "<subj>-<prop>-<obj>" convention. Direct-triple claims
-    (no stored path) have their supporting edge reconstructed from claim_key.
+    Reads the claim's support path (grounding_path) uniformly: every grounded
+    claim carries it (a single-edge path for a DIRECT_TRIPLE claim, the full path
+    for a multi-hop one). Edge ids follow the "<subj>-<prop>-<obj>" convention.
     """
     anchor = claim.linked_entities[0].id if claim.linked_entities else None
     if claim.grounding_path.edges:
@@ -103,12 +104,7 @@ def support_edges_and_nodes(claim: ClaimRecord) -> tuple[list[str], list[str], s
             for pe in claim.grounding_path.edges
         ]
         return eids, list(claim.grounding_path.node_ids), anchor
-    if claim.support_source == SupportSource.DIRECT_TRIPLE and claim.claim_key:
-        parts = claim.claim_key.split("|")
-        if len(parts) == 3 and parts[2].startswith("Q"):
-            head, rel, val = parts
-            return [f"{head}-{rel}-{val}"], [head, val], anchor
-    return [], ([anchor] if anchor else []), anchor
+    return [], list(claim.grounding_path.node_ids) or ([anchor] if anchor else []), anchor
 
 
 def highlight_stylesheet(
@@ -164,6 +160,34 @@ def highlight_stylesheet(
                 "font-weight": "bold",
             },
         })
+    return list(base) + appended
+
+
+def support_frequency_stylesheet(
+    base: list[dict], support_frequency: dict[str, float]
+) -> list[dict]:
+    """Return base + appended selectors sizing nodes/edges by support-frequency.
+
+    OBSERVATIONAL importance (§4.8): node size and edge width scale with the
+    fraction of the N runs in which that KG item was used to ground a claim.
+    Entity keys size NODES; triplet keys "<subj>|<prop>|<obj>" size the matching
+    EDGE (id "<subj>-<prop>-<obj>"). PURE — base is never mutated.
+    """
+    appended: list[dict] = []
+    for item, freq in support_frequency.items():
+        f = max(0.0, min(1.0, freq))
+        if "|" in item:  # triplet -> edge width
+            edge_id = item.replace("|", "-")
+            appended.append({
+                "selector": f'edge[id = "{edge_id}"]',
+                "style": {"width": 1.5 + 7.0 * f, "opacity": 0.35 + 0.6 * f},
+            })
+        else:  # entity -> node area (width == height)
+            size = 40 + 56 * f
+            appended.append({
+                "selector": f'node[id = "{item}"]',
+                "style": {"width": size, "height": size, "opacity": 0.45 + 0.55 * f},
+            })
     return list(base) + appended
 
 

@@ -12,18 +12,18 @@ from __future__ import annotations
 from dash import dcc, html
 
 from app import theme
-from app.panels.analytics import DEFAULT_N, get_analytics_panel
+from app.panels.analytics import get_analytics_panel
 from app.panels.answer import get_answer_panel
 from app.panels.repair import get_repair_panel
 from app.panels.subgraph import get_subgraph_panel
 from ivg_kg.mock.fixtures import (
     ALL_TRIPLE_IDS,
-    mock_answer_diagnostics,
     mock_grounding_run,
+    mock_single_run_summary,
     mock_subgraph_elements,
 )
 from ivg_kg.perturbation import available_perturbations
-from ivg_kg.schema import AnswerDiagnostics, GroundingRun
+from ivg_kg.schema import GroundingRun, SingleRunStatusSummary
 
 
 def get_perturbation_controls() -> html.Div:
@@ -186,15 +186,15 @@ def _settings_panel() -> html.Div:
 def get_layout(
     run: GroundingRun | None = None,
     elements: list[dict] | None = None,
-    diagnostics: AnswerDiagnostics | None = None,
+    single_summary: SingleRunStatusSummary | None = None,
 ) -> html.Div:
     """Compose the three-panel mockup layout with the shared store."""
     if run is None:
         run = mock_grounding_run()
     if elements is None:
         elements = mock_subgraph_elements()
-    if diagnostics is None:
-        diagnostics = mock_answer_diagnostics(DEFAULT_N)
+    if single_summary is None:
+        single_summary = mock_single_run_summary()
 
     return html.Div(
         [
@@ -209,7 +209,7 @@ def get_layout(
                              style={"flex": "1.05", "minWidth": "0"}),
                     html.Div(get_subgraph_panel(elements),
                              style={"flex": "1.5", "minWidth": "0"}),
-                    html.Div(get_analytics_panel(run, diagnostics),
+                    html.Div(get_analytics_panel(run, single_summary),
                              style={"flex": "1.1", "minWidth": "0"}),
                 ],
                 style={"display": "flex", "gap": "14px", "padding": "0 18px 14px 18px",

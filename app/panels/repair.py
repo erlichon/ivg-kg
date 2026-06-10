@@ -18,21 +18,21 @@ from ivg_kg.mock.fixtures import (
     SUGGESTED_INJECT,
     grounded_count,
     removed_triples,
+    repair_result,
 )
 
 _INFO_REPAIR = (
-    "Graph edits — a DETERMINISTIC re-verification (NOT a regeneration).\n"
-    "The claim text is held FIXED; removing/injecting a triple re-grades the SAME "
-    "claims against the edited KG (instant, bit-stable). This is a different view "
-    "from the Analytics per-claim card, which is the N-draw GENERATION-variance "
-    "distribution — here nothing is re-sampled.\n\n"
-    "REMOVE a triple by tapping its edge in the Subgraph panel → it leaves the KG "
-    "and the fixed claims re-grade; removed triples appear here with '+ re-add' "
-    "(the RQ3 repair-leverage counterfactual).\n\n"
-    "INJECT adds a NEW triple the KG lacked (CogMG) — a model suggestion pre-fills the "
-    "form, but you edit subject / relation / value before inserting. After every edit "
-    "the claims are re-verified against the full reference (the answer + chips update). "
-    "Scripted visual mock — no real generation/injection."
+    "Edit-the-KG (gap-repair / exploration) — layer 2 of 2.\n"
+    "This layer GENUINELY changes the KG / grading reference (contrast: "
+    "withhold-from-context in Analytics hides evidence from the GENERATOR only and "
+    "NEVER touches the reference). Grading here uses the CURRENT (edited) KG.\n\n"
+    "Gap-repair: the date claim is fabricated because the KG holds no usable "
+    "birth-date fact. INJECT the curated date (a model suggestion pre-fills the form, "
+    "editable) -> re-run -> the claim flips to grounded. repair-leverage = the COUNT "
+    "of claims that flip FABRICATED -> grounded on the restore + re-run (RQ3).\n\n"
+    "REMOVE a triple by tapping its edge in the Subgraph panel (free exploration); "
+    "removed triples appear here with '+ re-add'. Scripted visual mock — no real "
+    "generation/injection."
 )
 
 
@@ -106,13 +106,29 @@ def render_repair_body(present: list[str] | None, injected: list[dict] | None = 
     )
 
     n = grounded_count(present, injected)
+    rr = repair_result(present, injected)
+    flipped = (
+        f"+{rr.repair_leverage} repaired: {', '.join(rr.repaired_claim_ids)}"
+        if rr.repair_leverage else "+0 repaired (no fabricated claim restored yet)"
+    )
     readout = html.Div(
         [
-            html.Span("grounded ", style={"color": theme.MUTED, "fontSize": "0.8em"}),
-            html.Span(f"{n}/6", style={"color": "#3fb950" if n else theme.MUTED,
-                                       "fontWeight": "bold", "fontSize": "1.1em"}),
-            html.Span("  claims (re-verified after the edit)  ·  scripted visual mock",
+            html.Span("repair-leverage ", style={"color": theme.MUTED, "fontSize": "0.8em"}),
+            html.Span(flipped, style={"color": "#3fb950" if rr.repair_leverage else theme.MUTED,
+                                      "fontWeight": "bold", "fontSize": "0.95em"}),
+            html.Span("  (claims FABRICATED -> grounded vs the original answer, on "
+                      "restore + re-run)",
                       style={"color": theme.FAINT, "fontSize": "0.72em"}),
+            html.Div(
+                [
+                    html.Span("grounded ", style={"color": theme.MUTED, "fontSize": "0.78em"}),
+                    html.Span(f"{n}/6", style={"color": theme.TEXT, "fontWeight": "bold"}),
+                    html.Span("  claims now (graded against the CURRENT edited KG)  ·  "
+                              "scripted visual mock",
+                              style={"color": theme.FAINT, "fontSize": "0.72em"}),
+                ],
+                style={"marginTop": "3px"},
+            ),
         ]
     )
     return html.Div([removed_block, injected_block, readout])
@@ -130,10 +146,9 @@ def get_repair_panel() -> html.Div:
                 style={"marginBottom": "4px"},
             ),
             html.Div(
-                "Deterministic re-verification — the claim text is FIXED; an edit "
-                "re-grades the SAME claims against the edited KG (instant, no "
-                "regeneration). Distinct from the N-draw generation-variance view in "
-                "Analytics.",
+                "Edit-the-KG (layer 2): this CHANGES the KG / grading reference and "
+                "re-runs — distinct from withhold-from-context (Analytics), which hides "
+                "evidence from the generator only and never changes the reference.",
                 style={"color": theme.FAINT, "fontSize": "0.7em", "fontStyle": "italic",
                        "marginBottom": "10px", "lineHeight": "1.4"},
             ),

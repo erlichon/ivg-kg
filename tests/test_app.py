@@ -10,8 +10,11 @@ import copy
 
 import plotly.graph_objects as go
 from app.app import make_app
-from app.charts.condition_breakdown import make_condition_breakdown_figure
-from app.charts.status_dist import make_status_distribution_figure
+from app.charts.status_dist import (
+    make_single_run_figure,
+    make_status_distribution_figure,
+)
+from app.charts.support_frequency import make_support_frequency_figure
 from app.layout import get_layout, get_perturbation_controls
 from app.panels.answer import render_claim_list
 from app.panels.subgraph import (
@@ -134,19 +137,41 @@ def test_callback_graph_single_writer():
     assert count("subgraph.stylesheet") == 1
     assert count("subgraph.elements") == 1
     assert count("claim-list.children") == 1
+    assert count("analytics-body.children") == 1  # single writer for the mode body
+
+
+# --- mode toggle + multi-run controls --------------------------------------
+def test_analytics_has_mode_and_multirun_controls():
+    s = str(get_layout())
+    assert "analytics-mode" in s and "n-selector" in s and "withhold-condition" in s
+
+
+def test_mode_bodies_render():
+    from app.panels.analytics import multi_run_body, single_run_body
+
+    single = str(single_run_body(fx.mock_single_run_summary())).lower()
+    assert "no se" in single and "single sample" in single
+    cd = fx.mock_condition_diagnostics(20)
+    multi = str(multi_run_body(cd["full"], cd, "full", 20)).lower()
+    assert "support-frequency" in multi and "se" in multi and "shift" in multi
 
 
 # --- figure factories return Plotly figures --------------------------------
-def test_status_distribution_figure():
+def test_single_run_figure():
+    assert isinstance(make_single_run_figure(fx.mock_single_run_summary()), go.Figure)
+
+
+def test_status_distribution_figure_multirun():
     d = fx.mock_answer_diagnostics(20)
     assert isinstance(
-        make_status_distribution_figure(d.status_distribution, d.n_generations), go.Figure
+        make_status_distribution_figure(d.status_distribution, d.n_runs), go.Figure
     )
 
 
-def test_condition_breakdown_figure():
+def test_support_frequency_figure():
     d = fx.mock_answer_diagnostics(20)
-    assert isinstance(make_condition_breakdown_figure(d.claim_diagnostics[0]), go.Figure)
+    labels = {k: fx.kg_item_label(k) for k in d.support_frequency}
+    assert isinstance(make_support_frequency_figure(d.support_frequency, labels), go.Figure)
 
 
 # --- naming: UI shows "Supportable", never a bare "reasoned" ---------------
@@ -155,8 +180,8 @@ def test_ui_uses_supportable_not_reasoned():
     from app.panels.answer import get_answer_panel
 
     run = fx.mock_grounding_run()
-    diag = fx.mock_answer_diagnostics(20)
-    rendered = (str(get_answer_panel(run)) + str(get_analytics_panel(run, diag))).lower()
+    summary = fx.mock_single_run_summary()
+    rendered = (str(get_answer_panel(run)) + str(get_analytics_panel(run, summary))).lower()
     assert "supportable" in rendered
     # The long enum value may appear in code/option values, but never as a bare
     # "reasoned" UI label (constraint #4): strip the enum value, then assert.
@@ -181,7 +206,7 @@ def test_status_distribution_error_bars_are_proportion_se():
     assert proportion_se(1.0, 20) == 0.0
     assert abs(proportion_se(0.5, 20) - (0.25 / 20) ** 0.5) < 1e-12
     d = fx.mock_answer_diagnostics(20)
-    fig = make_status_distribution_figure(d.status_distribution, d.n_generations)
+    fig = make_status_distribution_figure(d.status_distribution, d.n_runs)
     assert isinstance(fig, go.Figure)
 
 

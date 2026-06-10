@@ -1,28 +1,32 @@
 """Hand-authored MOCK data for the IVG-KG dashboard mockup (offline, deterministic).
 
 One coherent scenario — *"When was Frédéric Chopin's father born?"* — authored to
-exercise every status, both Supportable variants, the value-mismatch fabrication,
-and the §4.8 per-claim/answer diagnostics across {full, knowledge-absent,
-content-absent} over N ∈ {5, 10, 20} draws.
+exercise every status (Retrieved / Supportable / Fabricated), the spurious path,
+the gap-repair, and the §4.8 single-run and multi-run diagnostics across
+{full, content-absent, knowledge-absent} over N in {5, 10, 20} runs.
 
 This is MOCK ONLY: no model, no SPARQL, no network. The grounding backend stays a
-stub; these fixtures stand in for what the real precompute would emit.
+stub; these fixtures stand in for what the real precompute would emit. Claims are
+NOT aligned across runs (§4.8); only stable KG-item IDs are.
 
 Public surface:
-  mock_grounding_run()        -> the displayed FULL draw #0 (rich claims)
-  mock_subgraph_elements()    -> dash-cytoscape elements (via the real graph_store)
-  mock_grading_reference()    -> the never-ablated reference (KG-full + content labels)
-  build_runset(n)             -> list[GroundingRun] : the N draws x conditions
-  mock_answer_diagnostics(n)  -> AnswerDiagnostics aggregated from build_runset(n)
-  CLAIM_SPANS                 -> {claim_id: substring of answer_text} for inline colouring
+  mock_grounding_run()           -> the displayed single-run answer (rich claims)
+  mock_single_run_summary()      -> SingleRunStatusSummary for that answer (no SE)
+  mock_subgraph_elements()       -> dash-cytoscape elements (via the real graph_store)
+  mock_grading_reference()       -> the never-ablated reference (KG-full + content labels)
+  build_condition_runset(n,cond) -> list[GroundingRun] : the N runs of one condition
+  build_runset(n)                -> list[GroundingRun] : N runs x the three conditions
+  mock_answer_diagnostics(n,cond)-> multi-run AnswerDiagnostics for one condition
+  mock_condition_diagnostics(n)  -> {condition: AnswerDiagnostics} : the withhold shift
+  repair_result(present,injected)-> RepairResult : the edit-the-KG flip count
+  CLAIM_SPANS                    -> {claim_id: substring of answer_text} for inline colouring
   QUESTION, ANSWER_TEXT, ERROR_RATES, N_CHOICES
 """
 from __future__ import annotations
 
 from ivg_kg.data.graph_store import nx_to_cyto_elements
-from ivg_kg.diagnostics import aggregate_runset
+from ivg_kg.diagnostics import aggregate_runset, single_run_summary
 from ivg_kg.schema import (
-    ABSENT,
     AnswerDiagnostics,
     ClaimRecord,
     ClaimStatus,
@@ -37,6 +41,8 @@ from ivg_kg.schema import (
     LinkedEntity,
     Modality,
     PathEdge,
+    RepairResult,
+    SingleRunStatusSummary,
     SupportSource,
     ValueType,
 )
@@ -68,24 +74,6 @@ P_DOB = ("P569", "date of birth")
 P_POB = ("P19", "place of birth")
 P_COUNTRY = ("P17", "country")
 P_NOTABLE = ("P800", "notable work")
-
-# Fact SLOTS (head + canonical relation; SPEC-text §4.8). The diagnostics are
-# anchored on these; a claim_key is slot_key + "|" + normalized_value (the VARIANT).
-SLOT_FATHER = f"{FCHOPIN}|P22"  # Chopin -> father
-SLOT_FPOB = f"{NCHOPIN}|P19"  # father -> place of birth
-SLOT_FDOB = f"{NCHOPIN}|P569"  # father -> date of birth  (the multi-variant slot)
-SLOT_FCOUNTRY = f"{NCHOPIN}|P19+P17"  # father -> born in <country> (multi-hop)
-SLOT_CPOB = f"{FCHOPIN}|P19"  # Chopin -> own place of birth (the spurious France)
-SLOT_NOTABLE = f"{FCHOPIN}|P800"  # Chopin -> notable work
-
-# Normalized values for the FALSE variants the generator hallucinates (mock,
-# opaque value tokens; they never enter the reference KG).
-VAL_DOB_TRUE = "1771-04-15"  # the reference-correct birth date variant
-VAL_DOB_FALSE = "1771-06-17"  # the displayed wrong-value variant
-_FALSE_FATHER = "Q-false-father"
-_FALSE_FPOB = "Q-false-fpob"
-_FALSE_COUNTRY = "Q-false-country"
-_FALSE_NOTABLE = "lit:false-notable"
 
 # Per-modality classifier error for the Trust strip (SPEC-text §4.7).
 ERROR_RATES: dict[str, float] = {"text-nli": 0.06, "structure-path": 0.09}
@@ -152,6 +140,19 @@ def mock_subgraph_elements() -> list[dict]:
     return nx_to_cyto_elements(chopin_snapshot())
 
 
+_PROP_LABELS: dict[str, str] = {
+    p[0]: p[1] for p in (P_FATHER, P_DOB, P_POB, P_COUNTRY, P_NOTABLE)
+}
+
+
+def kg_item_label(item: str) -> str:
+    """Human-readable label for a support-frequency KG-item id (entity or triplet)."""
+    if "|" in item:  # triplet key "<subj>|<prop>|<obj>"
+        s, p, o = item.split("|")
+        return f"{_NODE_LABELS.get(s, s)} -[{_PROP_LABELS.get(p, p)}]-> {_NODE_LABELS.get(o, o)}"
+    return _NODE_LABELS.get(item, item)
+
+
 def mock_grading_reference() -> GradingReference:
     """The never-ablated grading reference (KG-full + a content-only label)."""
     return GradingReference(
@@ -179,10 +180,17 @@ def _pe(subj: str, prop: tuple[str, str], obj: str, obj_label: str) -> PathEdge:
 
 
 # ---------------------------------------------------------------------------
-# Canonical claims (the displayed FULL draw #0) — rich, with paths + diagnostics
+# Canonical claims (the displayed single-run answer) — with support paths.
+# Each grounded claim carries its SUPPORT PATH in grounding_path (the KG items
+# the verdict rests on); a DIRECT_TRIPLE claim gets a single-edge path so that
+# support-frequency (§4.8) reads uniformly. FABRICATED claims carry no path.
 # ---------------------------------------------------------------------------
+def _direct_path(subj: str, prop: tuple[str, str], obj: str, obj_label: str) -> GroundingPath:
+    return GroundingPath(edges=[_pe(subj, prop, obj, obj_label)], node_ids=[subj, obj])
+
+
 def canonical_claims() -> list[ClaimRecord]:
-    """The six canonical claims (fresh objects each call)."""
+    """The six canonical claims of the displayed single-run answer (fresh each call)."""
     empty_path = GroundingPath(edges=[], node_ids=[])
     return [
         # c1 — RETRIEVED via direct triple P22 (father).
@@ -190,35 +198,33 @@ def canonical_claims() -> list[ClaimRecord]:
             claim_id="c1",
             text="Frédéric Chopin's father was Nicolas Chopin",
             status=ClaimStatus.RETRIEVED, support_source=SupportSource.DIRECT_TRIPLE,
-            slot_key=SLOT_FATHER, claim_key=f"{SLOT_FATHER}|{NCHOPIN}",
             linked_entities=[_ent(FCHOPIN), _ent(NCHOPIN)],
-            grounding_path=empty_path, entailment_score=0.97,
+            grounding_path=_direct_path(FCHOPIN, P_FATHER, NCHOPIN, "Nicolas Chopin"),
+            entailment_score=0.97,
         ),
         # c2 — RETRIEVED via direct triple P19 (place of birth).
         ClaimRecord(
             claim_id="c2",
             text="Nicolas Chopin was born in Marainville-sur-Madon",
             status=ClaimStatus.RETRIEVED, support_source=SupportSource.DIRECT_TRIPLE,
-            slot_key=SLOT_FPOB, claim_key=f"{SLOT_FPOB}|{MARAIN}",
             linked_entities=[_ent(NCHOPIN), _ent(MARAIN)],
-            grounding_path=empty_path, entailment_score=0.95,
+            grounding_path=_direct_path(NCHOPIN, P_POB, MARAIN, "Marainville-sur-Madon"),
+            entailment_score=0.95,
         ),
-        # c3 — FABRICATED: value mismatch (reference holds 15 April 1771).
+        # c3 — FABRICATED: the KG holds no usable birth-date fact, so the model's
+        # date does not ground (the gap-repair target). No support path.
         ClaimRecord(
             claim_id="c3",
             text="Nicolas Chopin was born on 17 June 1771",
             status=ClaimStatus.FABRICATED, support_source=SupportSource.NONE,
-            slot_key=SLOT_FDOB, claim_key=f"{SLOT_FDOB}|{VAL_DOB_FALSE}",
             linked_entities=[_ent(NCHOPIN)],
             grounding_path=empty_path, entailment_score=0.18,
-            spurious_path=False,
         ),
         # c4 — SUPPORTABLE, GENUINE path: father born in France (P19 → P17).
         ClaimRecord(
             claim_id="c4",
             text="Chopin's father was born in France",
             status=ClaimStatus.REASONED_SUPPORTABLE, support_source=SupportSource.MULTI_HOP_PATH,
-            slot_key=SLOT_FCOUNTRY, claim_key=f"{SLOT_FCOUNTRY}|{FRANCE}",
             linked_entities=[_ent(NCHOPIN), _ent(FRANCE)],
             grounding_path=GroundingPath(
                 edges=[
@@ -227,7 +233,7 @@ def canonical_claims() -> list[ClaimRecord]:
                 ],
                 node_ids=[NCHOPIN, MARAIN, FRANCE],
             ),
-            entailment_score=0.86, spurious_path=False,
+            entailment_score=0.86,
         ),
         # c5 — SUPPORTABLE but FLAGGED spurious: path reaches France via the FATHER's
         # birthplace, not Chopin's own (relation/value illegitimacy).
@@ -235,7 +241,6 @@ def canonical_claims() -> list[ClaimRecord]:
             claim_id="c5",
             text="Frédéric Chopin was born in France",
             status=ClaimStatus.REASONED_SUPPORTABLE, support_source=SupportSource.MULTI_HOP_PATH,
-            slot_key=SLOT_CPOB, claim_key=f"{SLOT_CPOB}|{FRANCE}",
             linked_entities=[_ent(FCHOPIN), _ent(FRANCE)],
             grounding_path=GroundingPath(
                 edges=[
@@ -247,22 +252,25 @@ def canonical_claims() -> list[ClaimRecord]:
             ),
             entailment_score=0.71,
             spurious_path=True,
-            spurious_reason=(
-                "relation/value illegitimacy: the path reaches France via the "
-                "father's place of birth (P22→P19→P17), not the subject's own "
-                "birthplace (P19) — Chopin was born in Żelazowa Wola, Poland."
-            ),
+            spurious_reason=_SPURIOUS_REASON,
         ),
         # c6 — RETRIEVED via direct triple P800 (notable work).
         ClaimRecord(
             claim_id="c6",
             text="Chopin is known for his Nocturnes",
             status=ClaimStatus.RETRIEVED, support_source=SupportSource.DIRECT_TRIPLE,
-            slot_key=SLOT_NOTABLE, claim_key=f"{SLOT_NOTABLE}|{NOCT}",
             linked_entities=[_ent(FCHOPIN), _ent(NOCT)],
-            grounding_path=empty_path, entailment_score=0.93,
+            grounding_path=_direct_path(FCHOPIN, P_NOTABLE, NOCT, "Nocturnes"),
+            entailment_score=0.93,
         ),
     ]
+
+
+_SPURIOUS_REASON = (
+    "relation/value illegitimacy: the path reaches France via the father's "
+    "place of birth (P22→P19→P17), not the subject's own birthplace (P19) — "
+    "Chopin was born in Żelazowa Wola, Poland."
+)
 
 
 # Inline answer-text spans (substrings) per claim, for status-coloured highlighting.
@@ -276,108 +284,84 @@ CLAIM_SPANS: dict[str, str] = {
 }
 
 
+def mock_grounding_run() -> GroundingRun:
+    """The displayed single-run answer (FULL condition, the rich canonical claims)."""
+    return GroundingRun(
+        run_id="chopin-full-0", question=QUESTION, answer_text=ANSWER_TEXT,
+        slice="books", phase="A", condition=Condition.FULL, sample_index=0,
+        claims=canonical_claims(), grading_reference_id="chopin-mock-v1",
+        error_rates=dict(ERROR_RATES),
+    )
+
+
+def mock_single_run_summary() -> SingleRunStatusSummary:
+    """Single-run status counts + percentages for the displayed answer (no SE; §4.8)."""
+    return single_run_summary(mock_grounding_run())
+
+
 # ---------------------------------------------------------------------------
-# Per-SLOT variant draw model (counts over _MAX_DRAWS GENERATION draws).
-#
-# The verifier is deterministic and grades against the full KG, so a VARIANT (a
-# fixed value for a slot) has ONE fixed status. What varies across the N draws is
-# WHICH variant the generator emits for each slot (or none -> absent). The mock
-# therefore tracks, per slot per condition, how often each variant value (and
-# absent) is drawn. Story: structural slots are answered with the correct value
-# under FULL but, under knowledge-absence, the generator more often emits a
-# WRONG-VALUE variant (fabricated) or omits the slot; the father's birth-DATE
-# slot is genuinely multi-variant even under FULL (the right date AND the
-# displayed wrong date both appear) -- this is where "fabrication = a wrong value
-# in the same slot" is visible. All variance is GENERATION variance (SPEC §4.8).
+# Multi-run model (#5): N runs per condition. Claims are NOT aligned across runs;
+# each run independently samples, per fact, whether the generator states it
+# correctly ("ok" -> its grounded status + support path), states a WRONG value
+# ("fab" -> FABRICATED, no support), or omits it ("absent"). Withholding evidence
+# from the GENERATION context (content- / knowledge-absent) shifts the per-run
+# status distribution toward fabrication WITHOUT relabelling true claims — grading
+# is always against the FULL reference. This is the withhold-from-context layer
+# (§4.4(a)); its result is the distribution SHIFT across conditions.
 # ---------------------------------------------------------------------------
-R = ClaimStatus.RETRIEVED
-S = ClaimStatus.REASONED_SUPPORTABLE
-F = ClaimStatus.FABRICATED
-A = ABSENT
+_OK, _FAB, _ABS = "ok", "fab", "absent"
+_OUTCOME_ORDER = [_OK, _FAB, _ABS]
 
-# Multi-hop supportable paths that the value-sensitive gate passes but that are
-# illegitimate support (SPEC-text §4.8 spurious_path); the displayed c5 shares it.
-_SPURIOUS_SLOTS = {SLOT_CPOB}
-_SPURIOUS_REASON = (
-    "relation/value illegitimacy: the path reaches France via the father's "
-    "place of birth (P22→P19→P17), not the subject's own birthplace (P19) — "
-    "Chopin was born in Żelazowa Wola, Poland."
-)
-
-# slot_key -> list of variants: (normalized_value, fixed status, surface text).
-# The first entry is the variant shown in the displayed answer (canonical_claims).
-_SLOT_VARIANTS: dict[str, list[tuple[str, ClaimStatus, str]]] = {
-    SLOT_FATHER: [
-        (NCHOPIN, R, "Frédéric Chopin's father was Nicolas Chopin"),
-        (_FALSE_FATHER, F, "Frédéric Chopin's father was Marc Chopin"),
-    ],
-    SLOT_FPOB: [
-        (MARAIN, R, "Nicolas Chopin was born in Marainville-sur-Madon"),
-        (_FALSE_FPOB, F, "Nicolas Chopin was born in Nancy"),
-    ],
-    SLOT_FDOB: [
-        (VAL_DOB_TRUE, R, "Nicolas Chopin was born on 15 April 1771"),
-        (VAL_DOB_FALSE, F, "Nicolas Chopin was born on 17 June 1771"),
-    ],
-    SLOT_FCOUNTRY: [
-        (FRANCE, S, "Chopin's father was born in France"),
-        (_FALSE_COUNTRY, F, "Chopin's father was born in Poland"),
-    ],
-    SLOT_CPOB: [
-        (FRANCE, S, "Frédéric Chopin was born in France"),
-        (_FALSE_COUNTRY, F, "Frédéric Chopin was born in Poland"),
-    ],
-    SLOT_NOTABLE: [
-        (NOCT, R, "Chopin is known for his Nocturnes"),
-        (_FALSE_NOTABLE, F, "Chopin is known for his symphonies"),
-    ],
+# Wrong-value surface text a run emits when a fact is fabricated.
+_FAB_TEXT: dict[str, str] = {
+    "c1": "Frédéric Chopin's father was Marc Chopin",
+    "c2": "Nicolas Chopin was born in Nancy",
+    "c3": "Nicolas Chopin was born on 17 June 1771",
+    "c4": "Chopin's father was born in Poland",
+    "c5": "Frédéric Chopin was born in Poland",
+    "c6": "Chopin is known for his symphonies",
 }
 
-# slot_key -> condition -> {normalized_value | ABSENT: draw count} (each sums to 20).
-_SLOT_DRAW_COUNTS: dict[str, dict[str, dict[str, int]]] = {
-    SLOT_FATHER: {
-        Condition.FULL.value: {NCHOPIN: 18, _FALSE_FATHER: 1, A: 1},
-        Condition.KNOWLEDGE_ABSENT.value: {NCHOPIN: 3, _FALSE_FATHER: 12, A: 5},
-        Condition.CONTENT_ABSENT.value: {NCHOPIN: 18, A: 2},
+# fact id -> condition -> {ok|fab|absent: count} (each sums to _MAX_DRAWS). FULL is
+# mostly grounded (c3 is the standing date fabrication); knowledge-absent collapses
+# the structural / path facts into fabrication or omission; content-absent shifts
+# only mildly (structure survives content withholding).
+_OUTCOME_COUNTS: dict[str, dict[str, dict[str, int]]] = {
+    "c1": {
+        Condition.FULL.value: {_OK: 18, _FAB: 1, _ABS: 1},
+        Condition.CONTENT_ABSENT.value: {_OK: 15, _FAB: 3, _ABS: 2},
+        Condition.KNOWLEDGE_ABSENT.value: {_OK: 4, _FAB: 12, _ABS: 4},
     },
-    SLOT_FPOB: {
-        Condition.FULL.value: {MARAIN: 18, _FALSE_FPOB: 1, A: 1},
-        Condition.KNOWLEDGE_ABSENT.value: {MARAIN: 4, _FALSE_FPOB: 10, A: 6},
-        Condition.CONTENT_ABSENT.value: {MARAIN: 17, A: 3},
+    "c2": {
+        Condition.FULL.value: {_OK: 18, _FAB: 1, _ABS: 1},
+        Condition.CONTENT_ABSENT.value: {_OK: 13, _FAB: 5, _ABS: 2},
+        Condition.KNOWLEDGE_ABSENT.value: {_OK: 5, _FAB: 11, _ABS: 4},
     },
-    SLOT_FDOB: {  # the multi-variant star slot
-        Condition.FULL.value: {VAL_DOB_TRUE: 8, VAL_DOB_FALSE: 7, A: 5},
-        Condition.KNOWLEDGE_ABSENT.value: {VAL_DOB_TRUE: 1, VAL_DOB_FALSE: 16, A: 3},
-        Condition.CONTENT_ABSENT.value: {VAL_DOB_TRUE: 7, VAL_DOB_FALSE: 8, A: 5},
+    "c3": {  # the date: fabricated under every condition (the KG lacks a usable date)
+        Condition.FULL.value: {_FAB: 16, _ABS: 4},
+        Condition.CONTENT_ABSENT.value: {_FAB: 16, _ABS: 4},
+        Condition.KNOWLEDGE_ABSENT.value: {_FAB: 18, _ABS: 2},
     },
-    SLOT_FCOUNTRY: {
-        Condition.FULL.value: {FRANCE: 16, A: 4},
-        Condition.KNOWLEDGE_ABSENT.value: {FRANCE: 4, _FALSE_COUNTRY: 8, A: 8},
-        Condition.CONTENT_ABSENT.value: {FRANCE: 15, A: 5},
+    "c4": {
+        Condition.FULL.value: {_OK: 16, _ABS: 4},
+        Condition.CONTENT_ABSENT.value: {_OK: 11, _FAB: 5, _ABS: 4},
+        Condition.KNOWLEDGE_ABSENT.value: {_OK: 4, _FAB: 8, _ABS: 8},
     },
-    SLOT_CPOB: {  # spurious-France supportable; collapses when the father link is withheld
-        Condition.FULL.value: {FRANCE: 12, _FALSE_COUNTRY: 8},
-        Condition.KNOWLEDGE_ABSENT.value: {FRANCE: 2, _FALSE_COUNTRY: 14, A: 4},
-        Condition.CONTENT_ABSENT.value: {FRANCE: 11, _FALSE_COUNTRY: 9},
+    "c5": {  # spurious-supportable France
+        Condition.FULL.value: {_OK: 12, _FAB: 8},
+        Condition.CONTENT_ABSENT.value: {_OK: 8, _FAB: 12},
+        Condition.KNOWLEDGE_ABSENT.value: {_OK: 2, _FAB: 14, _ABS: 4},
     },
-    SLOT_NOTABLE: {
-        Condition.FULL.value: {NOCT: 18, _FALSE_NOTABLE: 1, A: 1},
-        Condition.KNOWLEDGE_ABSENT.value: {NOCT: 3, _FALSE_NOTABLE: 11, A: 6},
-        Condition.CONTENT_ABSENT.value: {NOCT: 18, A: 2},
+    "c6": {
+        Condition.FULL.value: {_OK: 18, _FAB: 1, _ABS: 1},
+        Condition.CONTENT_ABSENT.value: {_OK: 15, _FAB: 3, _ABS: 2},
+        Condition.KNOWLEDGE_ABSENT.value: {_OK: 3, _FAB: 11, _ABS: 6},
     },
 }
 
-# Display claim_id (canonical_claims) -> slot_key, for the per-claim card lookup.
-SLOT_BY_CLAIM_ID: dict[str, str] = {
-    "c1": SLOT_FATHER, "c2": SLOT_FPOB, "c3": SLOT_FDOB,
-    "c4": SLOT_FCOUNTRY, "c5": SLOT_CPOB, "c6": SLOT_NOTABLE,
-}
-
-# Per-slot status + text lookup for a drawn variant value.
-_VARIANT_INFO: dict[str, dict[str, tuple[ClaimStatus, str]]] = {
-    slot: {value: (status, text) for value, status, text in variants}
-    for slot, variants in _SLOT_VARIANTS.items()
-}
+_WITHHOLD_CONDITIONS = [
+    Condition.FULL, Condition.CONTENT_ABSENT, Condition.KNOWLEDGE_ABSENT,
+]
 
 
 def _spread(counts: dict[str, int], order: list[str]) -> list[str]:
@@ -385,8 +369,7 @@ def _spread(counts: dict[str, int], order: list[str]) -> list[str]:
 
     Lowest placed/target ratio wins each slot (ties broken by `order`), so a
     minority value is distributed across the sequence — making N-prefixes of
-    5/10/20 give meaningfully different fractions (the N-selector does something).
-    The first declared value lands at index 0.
+    5/10/20 give meaningfully different fractions (the N selector does something).
     """
     placed = dict.fromkeys(counts, 0)
 
@@ -401,94 +384,79 @@ def _spread(counts: dict[str, int], order: list[str]) -> list[str]:
     return seq
 
 
-def _slot_value_vectors(condition: str) -> dict[str, list[str]]:
-    """slot_key -> per-draw drawn value (or ABSENT) under one condition."""
-    vectors: dict[str, list[str]] = {}
-    for slot, by_cond in _SLOT_DRAW_COUNTS.items():
-        # Tie-break order: declared variant values first, then ABSENT.
-        order = [v for v, _, _ in _SLOT_VARIANTS[slot]] + [A]
-        vectors[slot] = _spread(by_cond[condition], order)
-    return vectors
-
-
-def mock_grounding_run() -> GroundingRun:
-    """The displayed run: FULL condition, draw #0, the rich canonical claims."""
-    return GroundingRun(
-        run_id="chopin-full-0", question=QUESTION, answer_text=ANSWER_TEXT,
-        slice="books", phase="A", condition=Condition.FULL, sample_index=0,
-        claims=canonical_claims(), grading_reference_id="chopin-mock-v1",
-        error_rates=dict(ERROR_RATES),
-    )
-
-
-def _support_for(status: ClaimStatus) -> SupportSource:
-    if status == ClaimStatus.REASONED_SUPPORTABLE:
-        return SupportSource.MULTI_HOP_PATH
-    if status == ClaimStatus.RETRIEVED:
-        return SupportSource.DIRECT_TRIPLE
-    return SupportSource.NONE
-
-
-def build_runset(n: int = _MAX_DRAWS) -> list[GroundingRun]:
-    """Materialize the RunSet: n GENERATION draws under each condition.
-
-    For each condition, draw j fills each SLOT with whichever variant the
-    generator emitted on that draw (or omits the slot when the drawn value is
-    ABSENT). Each emitted claim carries the variant's FIXED status, its slot_key,
-    and a claim_key of slot_key + "|" + value. Grading is deterministic against
-    the full KG, so a variant's status never changes across draws/conditions; only
-    which variant appears does. Deterministic; n is clamped to [1, 20].
-    """
+def build_condition_runset(n: int, condition: Condition) -> list[GroundingRun]:
+    """The N runs for one condition (claims NOT aligned across runs; §4.8)."""
     n = max(1, min(n, _MAX_DRAWS))
-    conditions = [
-        Condition.FULL, Condition.KNOWLEDGE_ABSENT, Condition.CONTENT_ABSENT,
-    ]
-    empty_path = GroundingPath(edges=[], node_ids=[])
+    templates = {c.claim_id: c for c in canonical_claims()}
+    outcome_seqs = {
+        cid: _spread(_OUTCOME_COUNTS[cid][condition.value], _OUTCOME_ORDER)
+        for cid in _OUTCOME_COUNTS
+    }
     runs: list[GroundingRun] = []
-    for cond in conditions:
-        vectors = _slot_value_vectors(cond.value)
-        for j in range(n):
-            draw_claims: list[ClaimRecord] = []
-            for slot, values in vectors.items():
-                value = values[j]
-                if value == A:
-                    continue
-                status, text = _VARIANT_INFO[slot][value]
-                spurious = slot in _SPURIOUS_SLOTS and status == ClaimStatus.REASONED_SUPPORTABLE
-                draw_claims.append(
+    for j in range(n):
+        claims: list[ClaimRecord] = []
+        for cid in ("c1", "c2", "c3", "c4", "c5", "c6"):
+            outcome = outcome_seqs[cid][j]
+            if outcome == _ABS:
+                continue
+            tmpl = templates[cid]
+            if outcome == _OK and tmpl.status != ClaimStatus.FABRICATED:
+                claims.append(tmpl.model_copy(update={"claim_id": f"r{j}-{cid}"}))
+            else:  # fab (or a fact whose template is itself fabricated, e.g. c3)
+                claims.append(
                     ClaimRecord(
-                        claim_id=f"{slot}|{value}", text=text, status=status,
-                        support_source=_support_for(status),
-                        slot_key=slot, claim_key=f"{slot}|{value}",
-                        linked_entities=[], grounding_path=empty_path,
-                        spurious_path=spurious,
-                        spurious_reason=_SPURIOUS_REASON if spurious else None,
+                        claim_id=f"r{j}-{cid}", text=_FAB_TEXT[cid],
+                        status=ClaimStatus.FABRICATED, support_source=SupportSource.NONE,
+                        linked_entities=list(tmpl.linked_entities),
+                        grounding_path=GroundingPath(edges=[], node_ids=[]),
                     )
                 )
-            runs.append(
-                GroundingRun(
-                    run_id=f"chopin-{cond.value}-{j}", question=QUESTION,
-                    answer_text=ANSWER_TEXT, slice="books", phase="A",
-                    condition=cond, sample_index=j, claims=draw_claims,
-                    grading_reference_id="chopin-mock-v1", error_rates=dict(ERROR_RATES),
-                )
+        runs.append(
+            GroundingRun(
+                run_id=f"chopin-{condition.value}-{j}", question=QUESTION,
+                answer_text=ANSWER_TEXT, slice="books", phase="A",
+                condition=condition, sample_index=j, claims=claims,
+                grading_reference_id="chopin-mock-v1", error_rates=dict(ERROR_RATES),
             )
+        )
     return runs
 
 
-def mock_answer_diagnostics(n: int = _MAX_DRAWS) -> AnswerDiagnostics:
-    """Aggregate the n-draw RunSet into AnswerDiagnostics (§4.8)."""
-    return aggregate_runset(build_runset(n))
+def build_runset(n: int = _MAX_DRAWS) -> list[GroundingRun]:
+    """All N runs under each withhold-from-context condition, concatenated."""
+    runs: list[GroundingRun] = []
+    for cond in _WITHHOLD_CONDITIONS:
+        runs.extend(build_condition_runset(n, cond))
+    return runs
+
+
+def mock_answer_diagnostics(
+    n: int = _MAX_DRAWS, condition: Condition = Condition.FULL
+) -> AnswerDiagnostics:
+    """Multi-run diagnostics for one condition's N runs (default FULL; §4.8)."""
+    return aggregate_runset(build_condition_runset(n, condition))
+
+
+def mock_condition_diagnostics(n: int = _MAX_DRAWS) -> dict[str, AnswerDiagnostics]:
+    """Per-condition multi-run diagnostics — the withhold-from-context shift (#5)."""
+    return {
+        cond.value: aggregate_runset(build_condition_runset(n, cond))
+        for cond in _WITHHOLD_CONDITIONS
+    }
 
 
 # ---------------------------------------------------------------------------
-# Graph editor (mock; SPEC-text §4.6 / RQ3 + CogMG augmentation)
+# Edit-the-KG layer (mock; SPEC-text §4.4(b) / §4.6 / RQ3 + CogMG)
 # ---------------------------------------------------------------------------
-# The subgraph IS the editable KG. Ablation is PER SPECIFIC TRIPLE (no global
-# "knowledge-absent" mode): REMOVE a triple → it leaves the graph AND the answer
-# is regenerated without it → the claims re-verify. INJECT lets the analyst enter
-# a NEW triple (a model suggestion pre-fills it, but it is editable) — the CogMG
-# case. Deterministic, offline.
+# This layer GENUINELY changes the KG / grading reference (distinct from
+# withhold-from-context, which never touches the reference). The subgraph IS the
+# editable KG: REMOVE a triple -> it leaves the KG and the claims re-grade against
+# the edited reference; INJECT lets the analyst add a NEW triple the KG lacked
+# (a model suggestion pre-fills it, editable) — the CogMG gap-repair. The
+# gap-repair beat: the date claim (c3) is fabricated because the KG holds no usable
+# birth-date fact; injecting the curated date + re-running flips c3 to grounded.
+# `repair_result` reports the FABRICATED -> grounded flip count (repair-leverage).
+# Deterministic, offline.
 
 # The editable edges of the graph (the books triples).
 TRIPLES: list[dict] = [
@@ -560,6 +528,36 @@ def grounded_count(present: list[str] | None = None, injected: list[dict] | None
     """How many of the 6 claims currently ground (not Fabricated)."""
     return sum(
         1 for s in statuses_for_graph(present, injected).values() if s != ClaimStatus.FABRICATED
+    )
+
+
+def repair_result(
+    present: list[str] | None = None, injected: list[dict] | None = None
+) -> RepairResult:
+    """Repair-leverage: claims that flip FABRICATED -> grounded vs the original answer.
+
+    Baseline = the original full-graph answer (all triples present, nothing
+    injected): only the date claim (c3) is fabricated there. `repair_leverage` is
+    the COUNT of those baseline-fabricated claims now grounded after the analyst's
+    edit-the-KG restore + re-run (aligned by claim_id within this before/after).
+    """
+    baseline = statuses_for_graph(ALL_TRIPLE_IDS, [])
+    current = statuses_for_graph(present, injected)
+    repaired = [
+        cid for cid, st in current.items()
+        if baseline.get(cid) == ClaimStatus.FABRICATED and st != ClaimStatus.FABRICATED
+    ]
+    injs = injected or []
+    if injs:
+        restored = "; ".join(
+            f"{i.get('relation', '?')} = {i.get('value', '?')}" for i in injs
+        )
+    else:
+        restored = "(no KG additions yet)"
+    return RepairResult(
+        restored_item=restored,
+        repair_leverage=len(repaired),
+        repaired_claim_ids=repaired,
     )
 
 

@@ -1,17 +1,21 @@
-"""Light tests for the Chopin mock fixtures + diagnostics aggregation.
+"""Light tests for the Chopin mock fixtures + single-/multi-run diagnostics.
 
 Mock-only, offline, deterministic. Validates the fixtures against the schema and
-checks the RunSet aggregation is stable.
+checks the §4.8 aggregation (single-run summary, multi-run mean+/-SE,
+support-frequency, repair-leverage) is stable.
 """
 from __future__ import annotations
 
-from ivg_kg.diagnostics import aggregate_runset
+from ivg_kg.diagnostics import aggregate_runset, single_run_summary
 from ivg_kg.mock import fixtures as fx
 from ivg_kg.schema import (
     AnswerDiagnostics,
     ClaimStatus,
     Condition,
     GroundingRun,
+    RepairResult,
+    SingleRunStatusSummary,
+    StatusMeanSE,
     SupportSource,
 )
 
@@ -27,8 +31,12 @@ def test_mock_run_validates_and_spans_all_statuses():
         ClaimStatus.REASONED_SUPPORTABLE,
         ClaimStatus.FABRICATED,
     }
-    # every claim carries a claim_key (needed for RunSet alignment)
-    assert all(c.claim_key for c in run.claims)
+    # grounded claims carry a support path; fabricated ones do not
+    for c in run.claims:
+        if c.status == ClaimStatus.FABRICATED:
+            assert not c.grounding_path.node_ids and not c.grounding_path.edges
+        else:
+            assert c.grounding_path.node_ids
 
 
 def test_both_supportable_variants_and_value_mismatch_present():
@@ -38,7 +46,7 @@ def test_both_supportable_variants_and_value_mismatch_present():
     assert any(not c.spurious_path for c in supportable), "need a genuine path"
     spur = next(c for c in supportable if c.spurious_path)
     assert spur.spurious_reason  # has a reason
-    # the fabricated claim is a value mismatch (asserts 17 June; reference holds 15 April)
+    # the fabricated claim asserts the wrong date and has no support
     fab = next(c for c in run.claims if c.status == ClaimStatus.FABRICATED)
     assert fx.DOB_FALSE in fab.text and fab.support_source == SupportSource.NONE
 
@@ -54,6 +62,17 @@ def test_subgraph_elements_have_literal_node_and_referential_integrity():
             assert e["data"]["source"] in nodes and e["data"]["target"] in nodes
 
 
+# --- single-run (no SE) ----------------------------------------------------
+def test_single_run_summary_no_se():
+    s = fx.mock_single_run_summary()
+    assert isinstance(s, SingleRunStatusSummary)
+    assert sum(s.status_counts.values()) == 6
+    assert abs(sum(s.status_percentages.values()) - 1.0) < 1e-9
+    # 3 retrieved, 2 supportable, 1 fabricated in the displayed answer
+    assert s.status_counts[ClaimStatus.FABRICATED.value] == 1
+
+
+# --- multi-run (mean +/- SE, support-frequency) ----------------------------
 def test_build_runset_shapes():
     for n in fx.N_CHOICES:
         runs = fx.build_runset(n)
@@ -63,11 +82,12 @@ def test_build_runset_shapes():
             Condition.KNOWLEDGE_ABSENT,
             Condition.CONTENT_ABSENT,
         }
-        # n draws per condition
-        for cond in conds:
+        for cond in conds:  # n runs per condition
             assert sum(1 for r in runs if r.condition == cond) == n
-        # all draws validate (pydantic) and carry sample_index
         assert all(isinstance(r, GroundingRun) for r in runs)
+    # claims are NOT aligned across runs: within-run claim_ids only
+    runs = fx.build_condition_runset(5, Condition.FULL)
+    assert runs[0].claims[0].claim_id != runs[1].claims[0].claim_id
 
 
 def test_runset_clamped():
@@ -75,55 +95,72 @@ def test_runset_clamped():
     assert len({r.condition for r in fx.build_runset(50)}) == 3  # clamped to <=20, still 3 conds
 
 
-def test_answer_diagnostics_stable_and_well_formed():
-    d1 = fx.mock_answer_diagnostics(20)
-    d2 = fx.mock_answer_diagnostics(20)
+def test_multirun_diagnostics_stable_and_well_formed():
+    d1 = fx.mock_answer_diagnostics(20, Condition.FULL)
+    d2 = fx.mock_answer_diagnostics(20, Condition.FULL)
     assert isinstance(d1, AnswerDiagnostics)
     assert d1.model_dump() == d2.model_dump(), "aggregation must be deterministic/stable"
-    assert d1.n_generations == 20
-    assert len(d1.claim_diagnostics) == 6
-    assert 0.0 <= d1.fabrication_rate <= 1.0
-    assert abs(sum(d1.status_distribution.values()) - 1.0) < 1e-6
+    assert d1.n_runs == 20
+    # mean per-run fractions over the three grades sum to ~1 (claims always emitted)
+    assert all(isinstance(v, StatusMeanSE) for v in d1.status_distribution.values())
+    assert abs(sum(v.mean for v in d1.status_distribution.values()) - 1.0) < 1e-6
+    # SE of a proportion, not the ~0.5 per-draw std
+    for v in d1.status_distribution.values():
+        assert 0.0 <= v.se < 0.2
+
+
+def test_withhold_from_context_shifts_distribution():
+    cd = fx.mock_condition_diagnostics(20)
+    fab = ClaimStatus.FABRICATED.value
+    full = cd[Condition.FULL.value].status_distribution[fab].mean
+    content = cd[Condition.CONTENT_ABSENT.value].status_distribution[fab].mean
+    knowledge = cd[Condition.KNOWLEDGE_ABSENT.value].status_distribution[fab].mean
+    # withholding raises fabrication; knowledge-absence hurts most (structure withheld)
+    assert content > full
+    assert knowledge > content
+
+
+def test_support_frequency_observational_over_kg_items():
+    d = fx.mock_answer_diagnostics(20, Condition.FULL)
+    sf = d.support_frequency
+    assert sf, "expected a non-empty support-frequency map"
+    assert all(0.0 <= v <= 1.0 for v in sf.values())
+    # keys are entity ids and triplet ids "<subj>|<prop>|<obj>"
+    assert any("|" in k for k in sf), "expected triplet keys"
+    assert any("|" not in k for k in sf), "expected entity keys"
+    # the father triple grounds c1 in almost every FULL run
+    assert sf.get(f"{fx.FCHOPIN}|P22|{fx.NCHOPIN}", 0.0) > 0.8
 
 
 def test_n_selector_changes_distribution():
-    d5 = fx.mock_answer_diagnostics(5)
-    d20 = fx.mock_answer_diagnostics(20)
-    # the N selector must do something: the distribution shifts between N=5 and N=20
-    assert d5.status_distribution != d20.status_distribution
+    d5 = fx.mock_answer_diagnostics(5, Condition.FULL)
+    d20 = fx.mock_answer_diagnostics(20, Condition.FULL)
+    means5 = {k: v.mean for k, v in d5.status_distribution.items()}
+    means20 = {k: v.mean for k, v in d20.status_distribution.items()}
+    assert means5 != means20
 
 
 def test_aggregate_direct_runset_matches_helper():
-    runs = fx.build_runset(10)
+    runs = fx.build_condition_runset(10, Condition.FULL)
     assert aggregate_runset(runs).model_dump() == fx.mock_answer_diagnostics(10).model_dump()
 
 
-def test_slot_anchored_diagnostics_and_variant_breakdown():
-    # Diagnostics are anchored on the SLOT (head+relation), not the variant; the
-    # multi-variant birth-date slot exposes both a retrieved and a fabricated value.
-    d = fx.mock_answer_diagnostics(20)
-    by_slot = {cd.slot_key: cd for cd in d.claim_diagnostics}
-    dob = by_slot[fx.SLOT_FDOB]
-    statuses = {v.normalized_value: v.status for v in dob.variants}
-    assert statuses[fx.VAL_DOB_TRUE] == ClaimStatus.RETRIEVED
-    assert statuses[fx.VAL_DOB_FALSE] == ClaimStatus.FABRICATED
-    # presence_rate < 1 because the slot is sometimes absent across draws
-    assert 0.0 < dob.presence_rate < 1.0
-    # every variant carries a per-condition draw frequency
-    assert all(v.draw_frequency for v in dob.variants)
-    # the spurious supportable lives on Chopin's own place-of-birth slot
-    assert by_slot[fx.SLOT_CPOB].spurious_path
+def test_single_run_summary_matches_helper():
+    assert single_run_summary(fx.mock_grounding_run()).model_dump() == (
+        fx.mock_single_run_summary().model_dump()
+    )
 
 
+# --- edit-the-KG + repair-leverage -----------------------------------------
 def test_graph_editor_logic():
-    # full graph: 5 grounded (c3 = value-error fabricated until the date is injected)
+    # full graph: 5 grounded (c3 = date fabricated until a date-of-birth triple is injected)
     assert fx.grounded_count(fx.ALL_TRIPLE_IDS, []) == 5
     # remove the father triple (P22) -> c1 (and c5, which needs P22) fabricate
     without_p22 = [t for t in fx.ALL_TRIPLE_IDS if t != "P22"]
     s = fx.statuses_for_graph(without_p22, [])
     assert s["c1"].value == "fabricated" and s["c5"].value == "fabricated"
     assert s["c2"].value != "fabricated"  # P19 still present
-    # injecting an (editable) date-of-birth triple grounds the value-error claim c3
+    # injecting an (editable) date-of-birth triple grounds the date claim c3
     inj = [{"subject": fx.NCHOPIN, "relation": "date of birth", "value": "15 April 1771"}]
     assert fx.statuses_for_graph(fx.ALL_TRIPLE_IDS, inj)["c3"].value == "retrieved"
     # editable elements: the removed triple's edge is gone; the injected edge is tagged
@@ -131,3 +168,14 @@ def test_graph_editor_logic():
     assert "P22" not in {e["data"].get("property_id") for e in edges}
     assert any(e["data"].get("injected") == "1" for e in edges)
     assert [t["id"] for t in fx.removed_triples(without_p22)] == ["P22"]
+
+
+def test_repair_leverage_counts_fabricated_to_grounded_flips():
+    # baseline (original answer): only the date claim c3 is fabricated -> leverage 0
+    base = fx.repair_result(fx.ALL_TRIPLE_IDS, [])
+    assert isinstance(base, RepairResult)
+    assert base.repair_leverage == 0
+    # inject the curated date -> c3 flips fabricated->grounded -> leverage +1
+    inj = [{"subject": fx.NCHOPIN, "relation": "date of birth", "value": "15 April 1771"}]
+    rr = fx.repair_result(fx.ALL_TRIPLE_IDS, inj)
+    assert rr.repair_leverage == 1 and rr.repaired_claim_ids == ["c3"]
