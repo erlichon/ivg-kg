@@ -579,3 +579,100 @@ SPEC §4.7 (the curated per-slice QA set with adversarial negatives remains in S
 the statement). Verifier-model and live-path OPEN decisions = CLOSED (above). The previously-applied
 slot/variant addendum (2026-06-10, earlier) is **superseded** by this one. F6 (reference [7]) remains
 open, on the user.
+
+---
+
+## Addendum (2026-06-11) — RQ2 refined to a two-part dependence question (report-driven; statement redline PENDING)
+
+While revising the intermediate report against the two-mode metrics, RQ2 was restated as a
+**two-part KG-item dependence question** so the RQ is anchored in the metrics the instrument
+actually produces (support-frequency; status-distribution shift). The intermediate report
+(`intermediate-report/draft.tex`) already uses this wording; the statement does **not** yet.
+
+**Proposed §3 RQ2 (replaces the current wording; PENDING user/team approval):**
+> **RQ2 — Which KG items does a query depend on?**
+> (a) *Observationally* — across N stochastic generations, which triplets and content nodes does
+> grounding route through (**support-frequency**, observational importance, not causal)?
+> (b) *Causally* — how does withholding a modality's evidence from the generation context shift
+> the claim-status distribution across {full, content-withheld, knowledge-withheld} (the
+> controlled absence manipulation, graded against the full reference)?
+> And do the two views of importance agree — are high-support-frequency items also those whose
+> withholding induces the largest shift?
+
+**What this preserves:** (b) IS the statement's current RQ2 (per-modality controlled
+manipulation, reported as the distribution shift — unchanged). The absence-induced-hallucination
+spine, the per-slice framing, the Phase-A/Phase-B staging, and contribution 2 are untouched.
+
+**What this adds:** (a) promotes support-frequency from an interface feature (§6) into the
+research question; plus the (a)-vs-(b) agreement analysis as a planned comparison —
+modality-level on all runs; per-item on selected queries only (per-item withholding multiplies
+the run budget N x items).
+
+**Honesty guard:** (a) is explicitly observational ("routes through", verifier-side), (b) is the
+controlled manipulation (generation-side); agreement is an empirical question, not an assumption
+— a high-frequency item whose absence induces no shift (parametrically-known fact) is itself a
+finding.
+
+**Status: APPROVED & APPLIED (2026-06-11).** Sign-off: "what we did in the demo is the
+source-of-truth." Applied to `project_statement.md` §3 RQ2: header restructured to the
+two-part dependence question; (a) observational support-frequency added; Phase A / Phase B
+preserved verbatim under (b); the agreement paragraph appended after Phase B.
+
+---
+
+## Addendum (2026-06-11) — decision B: perturbation/RQ2 interaction model simplified (SPEC + TASKS applied)
+
+Applied **decision B**, a focused refinement of the perturbation surface and the RQ2 interaction
+model. **Applied to `spec/SPEC-text.md` and `tasks/TASKS.md`.** `project_statement.md` §6 was
+**reviewed and left unchanged** (see below). No change to the three-way status + "Supportable" UI
+label, hue=status, the multimodal/image gating + slices, generator/verifier separation + the
+verifier-model decision (DeBERTa live / MiniCheck-7B offline), `repair_leverage` as a flip count, the
+§6/validation controls, or the support-frequency definition.
+
+**What changed.**
+- **Dropped the interactive per-question modality-condition toggle.** The interactive tool no longer
+  exposes a per-question content-vs-knowledge condition selector. The **multi-run condition selector**
+  {full / content-withheld / knowledge-withheld} is **removed from the interface**, and the **per-edit
+  SCOPE contrast** (and any "generation-only add") is removed.
+- **Perturbation collapses to two operations.** **REMOVE** (a description or a triplet) =
+  withhold from the **generation context only**; the verifier / grading reference is **ALWAYS the full
+  reference and is NEVER ablated**. **ADD** (a true missing fact) = to the **KG** (changes both the
+  generation context and the grading reference) → repair / `repair_leverage` count. We **never remove
+  from the verifier**: REMOVE tests whether the model NEEDS the evidence; ADD REPAIRS the knowledge
+  base.
+- **RQ2 quantification.** RQ2 is **quantified via the OFFLINE bank aggregate** (question bank x N runs
+  x {full, content-withheld, knowledge-withheld}, withhold-from-context, graded vs the full reference),
+  reported as a **figure** — plus a **single-run qualitative demo** (REMOVE a description/triplet from
+  the generation context → re-run → watch the answer fabricate). The aggregate, NOT an interactive
+  toggle, IS the RQ2 result.
+- **Multi-run mode** = the **FULL-condition** claim-status distribution as **mean +/- SE** over N runs
+  (reproducibility of grounding on the question) + the **support-frequency** map (observational, not
+  causal). The small-N caveat is kept.
+- **Single-run mode** gains the two interactive demos: REMOVE→fabricate (qualitative RQ2) and
+  ADD→repair (RQ3, with the `repair_leverage` count).
+- **The withhold-from-context MECHANISM is RETAINED** (`TextContentAbsence` / `KnowledgeAbsence`) — the
+  offline sweep still uses it. Only the **interactive per-question condition selector** and the SCOPE
+  contrast were removed, not the backend ablation.
+
+**`project_statement.md` §6 — reviewed, NOT adjusted.** §6's Analytics-panel prose describes multi-run
+analytics as the **status distribution (mean +/- SE) + support-frequency** (observational importance) +
+modality coverage; it does **not** imply an interactive per-question content-vs-knowledge
+comparison/toggle. RQ2 (§3) and §8 already frame the content-vs-knowledge contrast as an **analytic
+aggregate over the question bank** (correct under decision B). No §6 edit was required; RQ2 (§3) and §8
+framing were left untouched.
+
+**Where applied.**
+- `spec/SPEC-text.md`: §4.4 (two operations only — REMOVE-from-context / ADD-to-KG; verifier reference
+  never ablated; SCOPE contrast and generation-only-add removed; withhold mechanism retained for the
+  sweep), §4.5 (single-run gains REMOVE + ADD demos; multi-run is FULL-condition + drops the condition
+  selector), §4.8 (two-operation grading; dropped per-condition distribution shift from per-question
+  diagnostics; added the OFFLINE-sweep RQ2 cross-reference), §8 (precompute = the RQ2 sweep over
+  {full, content-withheld, knowledge-withheld}; the aggregate is the RQ2 figure).
+- `tasks/TASKS.md`: UI4 (multi-run drops the condition selector, FULL-condition mean+/-SE +
+  support-frequency; single-run gains the two demos), EX5 (per-question diagnostics =
+  FULL-condition status mean+/-SE + support-frequency + repair_leverage; modality-condition
+  aggregation belongs to EX4), EX4/GR11 ({full, content-withheld, knowledge-withheld} sweep = the RQ2
+  aggregate source), Invariants #13 (single-run demos + FULL-condition multi-run, no condition
+  selector) and #15 (rewritten to REMOVE-from-context / ADD-to-KG; verifier never ablated; offline
+  aggregate quantifies RQ2, interactive tool is qualitative only). Dependency graph and waves
+  untouched.

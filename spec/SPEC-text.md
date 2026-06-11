@@ -252,32 +252,37 @@ systems with opposite goals; do not blur them.
 Classification always reads the **grading reference**, never the ablated context.
 
 ### 4.4 Perturbation interface (P0)
-**Two perturbation layers, distinct grading semantics (load-bearing).**
-- **(a) Withhold-from-context** (RQ2 absence experiment) — hide content (description) or structural
-  (triplet) evidence from the **generation context only**. The item **STAYS in the grading
-  reference**; classification grades against the **FULL** reference. This is the controlled
-  absence-induced-hallucination manipulation; it is a **multi-run** operation and its result is the
-  **shift in the claim-status distribution** across conditions {full, content-withheld,
-  knowledge-withheld}. There is **no `absence_leverage` / `fabrication_induction` scalar** — report
-  the distribution shift (the report may state the difference of means).
-- **(b) Edit-the-KG** (gap-repair / free exploration) — genuinely **add/remove** a triplet or node
-  content from the KG itself, **changing the ground truth**. Classification then grades against the
-  **CURRENT (edited)** KG. This powers the gap-repair demo (a true claim is fabricated because the KG
-  lacks the triplet → analyst adds it → re-run → claim becomes grounded).
+**Two operations only, distinct grading semantics (load-bearing).** The perturbation surface
+collapses to exactly two operations; there is **no per-edit SCOPE contrast** and **no
+"generation-only add"**.
+- **REMOVE** (a description or a triplet) — withhold that evidence **from the GENERATION CONTEXT
+  only**. The verifier / grading reference is **ALWAYS the full reference and is NEVER ablated**;
+  classification grades against the **FULL** reference. This is the withhold-from-context mechanism
+  (the controlled absence-induced-hallucination manipulation). It is used **qualitatively** in the
+  single-run REMOVE demo (§4.5) and **quantitatively** by the OFFLINE sweep (§8) — the sweep is where
+  RQ2 is quantified. There is **no `absence_leverage` / `fabrication_induction` scalar**.
+- **ADD** (a true missing fact) — genuinely **add** a triplet or node content **to the KG**,
+  changing **both** the generation context and the grading reference. Classification then grades
+  against the **CURRENT (edited)** KG. This is repair / gap-repair → the `repair_leverage` count
+  (a true claim is fabricated because the KG lacks the triplet → analyst adds it → re-run → claim
+  becomes grounded).
 
-**Withhold-from-context NEVER changes the grading reference; edit-the-KG DELIBERATELY changes it.**
-Both are graded against the current reference; the difference is whether the edit touched the
-reference.
+**We NEVER remove from the verifier.** REMOVE tests whether the model **NEEDS** the evidence (it
+hides evidence from generation while the grader keeps the full reference); ADD **REPAIRS** the
+knowledge base (it changes the ground truth). There is no per-edit scope toggle and no
+generation-only add: REMOVE = generation-context only (reference never ablated), ADD = to the KG.
 
 `Perturbation` ABC (`type_name`, `id`, `modality`, `withhold(ctx)->ctx`, `manifest_entry()`,
 `control_spec()`) + registry + `AblationManifest` (serialize/`from_json`, fixed before inspection).
-The withhold-from-context classes are: `TextContentAbsence(entity_id)`,
+The withhold-from-context classes are **retained unchanged** — `TextContentAbsence(entity_id)`,
 `KnowledgeAbsence(triples: list[TripleRef])`, `ImageContentAbsence(entity_id)` (generic
-withhold-the-image seam; its *data/grading* is the image axis). All withhold from the **generation
-context**, not the frozen KG. (Edit-the-KG is the §4.6 repair layer — it mutates the KG/reference.)
-A claim's `active_perturbations` lists entries touching its linked entities (composed-manifest
-attributable; caveat: ambiguous if one claim links two entities under different perturbations — fine
-for Phase-A single-axis runs).
+withhold-the-image seam; its *data/grading* is the image axis) — because the **offline sweep still
+uses this mechanism** (§8). All withhold from the **generation context**, not the frozen KG.
+(ADD-to-KG is the §4.6 repair layer — it mutates the KG/reference.) What is removed in this round is
+the **interactive per-question condition selector** and the SCOPE contrast, **not** the backend
+ablation mechanism. A claim's `active_perturbations` lists entries touching its linked entities
+(composed-manifest attributable; caveat: ambiguous if one claim links two entities under different
+perturbations — fine for Phase-A single-axis runs).
 
 ### 4.5 Interface — three panels (P0 skeleton; P2 full)
 dash-cytoscape; Dash 2.x; data/layout/callbacks separation; one `get_*_panel()` / `make_*_figure()`.
@@ -309,20 +314,29 @@ per-modality error strip hosted in Analytics.
 - **Analytics panel** (Knowledge + Trust) — operates in **two modes** (a mode toggle), plus the
   always-visible Trust strip:
   - **SINGLE-RUN mode** — one generated answer. Shows **that one run's status percentages** (and raw
-    counts) with **NO SE** (it is a single sample), driven by `SingleRunStatusSummary` (§4.2). The
-    per-claim **support-path highlight** ("what this verdict rests on") and per-claim status live with
-    this mode (Answer + Subgraph panels). No N selector here.
-  - **MULTI-RUN mode (#5)** — re-runs the query **N times** (N selectable, **default 20**) and shows:
-    **(a)** the **status distribution as mean +/- SE** of the per-run answer-level fraction of claims
-    that are retrieved / reasoned-supportable / fabricated (`AnswerDiagnostics.status_distribution`,
-    §4.8) as a column chart with error bars; **(b)** **support-frequency** — for each KG node and each
-    triplet, the fraction of the N runs in which it was **used** to ground a claim
-    (`AnswerDiagnostics.support_frequency`), visualised as **node-size / edge-weight on the subgraph**.
-    Support-frequency is **observational importance**, explicitly **NOT** causal leverage. Plus
-    **modality coverage** and **repair history + the repair-leverage count** (§4.6).
-    **Small-N caveat (prominent):** the error bars are the **SE of a proportion** (`sqrt(p(1-p)/N)`),
-    **not** the ~0.5 Bernoulli per-draw std; **N=20 is a FLOOR, not a target** — the caveat must be
-    prominent in the view and its meaning pinned in the caption.
+    counts) with **NO SE** (it is a single sample), driven by `SingleRunStatusSummary` (§4.2), the
+    per-claim **support-path highlight** ("what this verdict rests on") and per-claim status (Answer +
+    Subgraph panels). No N selector here. **Plus two interactive demos on this one answer:**
+    **(a) REMOVE demo (qualitative RQ2):** REMOVE a description or a triplet from the **generation
+    context** → re-run → watch this one answer **fabricate** the now-unsupported claim (the verifier
+    reference is unchanged); **(b) ADD demo (RQ3):** ADD a true missing fact to the **KG** → re-run →
+    watch the claim **flip to grounded** and show the **`repair_leverage` count** (§4.6). The REMOVE
+    demo is the **qualitative** RQ2 illustration on a single answer; RQ2 is **quantified** by the
+    offline sweep (§8), not here.
+  - **MULTI-RUN mode (#5)** — re-runs the query **N times** (N selectable, **default 20**) **under the
+    FULL condition** (no condition selector) and shows: **(a)** the **FULL-condition claim-status
+    distribution as mean +/- SE** of the per-run answer-level fraction of claims that are retrieved /
+    reasoned-supportable / fabricated (`AnswerDiagnostics.status_distribution`, §4.8) as a column chart
+    with error bars — this is the **reproducibility of grounding on this question**; **(b)**
+    **support-frequency** — for each KG node and each triplet, the fraction of the N runs in which it
+    was **used** to ground a claim (`AnswerDiagnostics.support_frequency`), visualised as
+    **node-size / edge-weight on the subgraph**. Support-frequency is **observational importance**,
+    explicitly **NOT** causal leverage. Plus **modality coverage** and **repair history + the
+    repair-leverage count** (§4.6). There is **no multi-run condition selector**
+    {full / content-withheld / knowledge-withheld} in the interface — the modality contrast is the
+    offline sweep's job (§8). **Small-N caveat (prominent):** the error bars are the **SE of a
+    proportion** (`sqrt(p(1-p)/N)`), **not** the ~0.5 Bernoulli per-draw std; **N=20 is a FLOOR, not a
+    target** — the caveat must be prominent in the view and its meaning pinned in the caption.
   - **Trust indicator** — always-visible, rendering `GroundingRun.error_rates` (per-modality
     classifier error — the MMA-model Trust pillar). Bars start at y=0; node sizing by area.
 - **Coordination:** `dcc.Store(selected_claim)` written by Answer-click; Subgraph + Analytics read it
@@ -377,11 +391,12 @@ across runs is WHY this design is simpler** than a per-claim cross-run scheme. W
   percentages** over that run's claims (`SingleRunStatusSummary`, §4.2). It is a **single sample** —
   **no SE/STD**. The per-claim support-path highlight (the support path of each grounded claim,
   "what this verdict rests on") and per-claim status accompany it.
-- **Multi-run status mean +/- SE (ANSWER-LEVEL).** Re-run the query **N times** (default 20). For
-  each run compute the **answer-level fraction** of claims that are retrieved / reasoned-supportable /
-  fabricated; then report, per status, the **mean and SE across the N runs**
-  (`AnswerDiagnostics.status_distribution: dict[status, StatusMeanSE]`). The fraction is computed
-  per-run first, then aggregated across runs — never pooled.
+- **Multi-run status mean +/- SE (ANSWER-LEVEL, FULL condition).** Re-run the query **N times**
+  (default 20) **under the FULL condition** (no condition selector — this measures the
+  reproducibility of grounding on this question). For each run compute the **answer-level fraction** of
+  claims that are retrieved / reasoned-supportable / fabricated; then report, per status, the **mean
+  and SE across the N runs** (`AnswerDiagnostics.status_distribution: dict[status, StatusMeanSE]`).
+  The fraction is computed per-run first, then aggregated across runs — never pooled.
 - **Support-frequency (observational, NOT causal).** For each KG **node** and each **triplet**,
   `support_frequency[id]` = the **fraction of the N runs in which that item was USED to ground a
   claim**. **Definition of "used":** the item **lies on the support path of >= 1 grounded claim in
@@ -396,11 +411,17 @@ across runs is WHY this design is simpler** than a per-claim cross-run scheme. W
   `claim_id` within that one answer's before/after pair (`RepairResult.repair_leverage`). Cross-ref
   §4.6; this is the **only** place claims are aligned (within a single before/after, not across the N
   runs).
-- **Two-layer perturbation grading (cross-ref §4.4).** **Withhold-from-context** (RQ2) hides evidence
-  from the generation context only and **grades against the FULL reference**; its result is the
-  multi-run **shift in the claim-status distribution** across {full, content-withheld,
-  knowledge-withheld} — there is **no `absence_leverage` / `fabrication_induction` scalar**.
-  **Edit-the-KG** (repair) changes the reference and **grades against the current (edited)** reference.
+- **Two-operation perturbation grading (cross-ref §4.4).** **REMOVE** (withhold-from-context, RQ2)
+  hides a description/triplet from the generation context only and **grades against the FULL reference
+  (NEVER ablated)**. **ADD** (edit-the-KG, repair) changes the reference and **grades against the
+  current (edited)** reference. There is **no `absence_leverage` / `fabrication_induction` scalar** and
+  **no per-edit SCOPE contrast**.
+- **RQ2 content-vs-knowledge contrast is OFFLINE, not interactive.** The content-vs-knowledge contrast
+  (RQ2) is computed by the **OFFLINE sweep aggregate** — question bank x N runs x {full,
+  content-withheld, knowledge-withheld}, withhold-from-context, graded vs the full reference — and
+  reported as a **figure** (cross-ref §8 data flow, TASKS EX4/GR11). It is **NOT a per-question
+  interactive feature**; the per-question diagnostics above carry no per-condition distribution shift.
+  The single-run REMOVE demo (§4.5) illustrates RQ2 only **qualitatively**.
 - **Statistical honesty (small-N; prominent).** A proportion `p` over N runs carries uncertainty
   `SE = sqrt(p(1-p)/N)` — the SE **of the proportion**, NOT the Bernoulli per-draw std (~0.5).
   **`N=20` is a FLOOR, not a target.** Error bars MUST be the **SE/CI of the proportion** with their
@@ -454,10 +475,14 @@ SPARQLWrapper (W3C), WikibaseIntegrator (MIT); QLever (public fallback). **Groun
 ## 8. End-to-end data flow
 **Build (online, once):** `pipeline.py` → enumerate (band) + filter → fetch triples/description →
 freeze `frozen/books/...`; author manifests + question bank + content labels. **Precompute
-(offline-capable):** (question × {full, manifest entry} × **N runs**) assemble→`generate_answer`→
-`ground_response` → `data/runs/<id>.json` (the N runs per question/condition), aggregated to
-`AnswerDiagnostics` (§4.8: answer-level status mean+/-SE + support-frequency over KG-item IDs);
-per-modality error. **Runtime (demo):** load frozen slice + the **frozen scenario** run-sets → render
+(offline-capable) — also the RQ2 sweep:** (question × {full, content-withheld, knowledge-withheld}
+× **N runs**) assemble→`generate_answer`→`ground_response` (withhold-from-context; graded vs the
+**full reference**) → `data/runs/<id>.json` (the N runs per question/condition). The per-question FULL
+runs aggregate to `AnswerDiagnostics` (§4.8: answer-level status mean+/-SE + support-frequency over
+KG-item IDs). The full {full, content-withheld, knowledge-withheld} sweep over the bank aggregates to
+the **RQ2 modality contrast** — the claim-status distribution shift across conditions, reported as a
+**figure** (this aggregate, NOT an interactive toggle, IS the RQ2 result; §4.8, TASKS EX4/GR11).
+Per-modality error. **Runtime (demo):** load frozen slice + the **frozen scenario** run-sets → render
 panels → coordinated interactions are store/stylesheet updates. **Two live paths:** the repair loop
 (edit-the-KG + re-run), and **live multi-run for a new question** (§4.6, N runs — minutes on the
 local model; not used for the canned on-stage story).

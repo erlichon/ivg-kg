@@ -113,11 +113,15 @@ Non-obvious load-bearing decisions a cold agent will otherwise violate (from `SP
     The status filter is over the **three grades**; "proposed" is the input universe, not a fourth grade.
 13. **Two modes; claims NOT aligned across runs (SPEC-text §4.5/§4.8).** **Single-run** = one
     answer's status %/counts, **no SE** (one sample), + per-claim support-path highlight + per-claim
-    status. **Multi-run** (N=20 default, N selectable) = (a) status **mean +/- SE** of the
-    **answer-level per-run fraction** (computed per run, then mean+SE across runs); (b)
-    **support-frequency** per KG node/triplet = fraction of N runs the item was **used** (lies on the
-    support path of >=1 grounded claim) — **observational, NOT causal**. **Claims are NOT aligned
-    across runs; only stable KG-item IDs are** — that is why this design is simpler. `repair_leverage`
+    status, **plus two interactive demos: REMOVE-from-context → re-run → fabricate (qualitative RQ2);
+    ADD-to-KG → re-run → flip-to-grounded + repair_leverage (RQ3)**. **Multi-run** (N=20 default, N
+    selectable, **FULL condition only — NO condition selector**) = (a) FULL-condition status
+    **mean +/- SE** of the **answer-level per-run fraction** (computed per run, then mean+SE across
+    runs; reproducibility of grounding); (b) **support-frequency** per KG node/triplet = fraction of N
+    runs the item was **used** (lies on the support path of >=1 grounded claim) — **observational, NOT
+    causal**. The content-vs-knowledge contrast (RQ2) is the **offline bank aggregate** (a report
+    figure), NOT an interactive toggle. **Claims are NOT aligned across runs; only stable KG-item IDs
+    are** — that is why this design is simpler. `repair_leverage`
     (RQ3, EX3) = **count** of claims flipping FABRICATED→grounded on restore (edit-the-KG) + **re-run**,
     aligned by `claim_id` **within one answer's before/after** (regeneration-based, not deterministic
     re-grounding). Classification is **deterministic given a fixed answer text**; **reported figures
@@ -131,15 +135,20 @@ Non-obvious load-bearing decisions a cold agent will otherwise violate (from `SP
     *generation* variance. Verifier choice is **accuracy-first**: **DeBERTa-v3-large on the LIVE path**
     (the live path DOES verify live), **MiniCheck-7B for offline precompute/calibration**; **cache
     verification by distinct evidence-pair**.
-15. **Two perturbation layers, distinct grading (SPEC-text §4.4/§4.8).** **Withhold-from-context**
-    (RQ2) hides evidence from the **generation context only** and **grades vs the FULL reference** —
-    result is the **distribution shift** across {full, content-withheld, knowledge-withheld}, NOT a
-    leverage scalar. **Edit-the-KG** (repair / free exploration) **changes the reference** (ground
-    truth) and **grades vs the current (edited)** reference. Both grade vs the *current* reference; the
-    difference is whether the edit touched the reference. There is **no `absence_leverage` /
-    `fabrication_induction` scalar** and **no per-claim stability / slot / variant machinery** — these
-    are dropped. Multi-run proportions carry `SE=sqrt(p(1-p)/N)` (not the ~0.5 Bernoulli std); **N=20
-    is a floor**.
+15. **Two perturbation operations only, distinct grading (SPEC-text §4.4/§4.8).** **REMOVE** (a
+    description or a triplet) = withhold from the **GENERATION CONTEXT only**; the verifier / grading
+    reference is **ALWAYS the full reference and is NEVER ablated**. **ADD** (a true missing fact) = to
+    the **KG** (changes both generation context and grading reference) → repair / `repair_leverage`.
+    **We NEVER remove from the verifier; there is no per-edit SCOPE contrast and no "generation-only
+    add".** REMOVE tests whether the model NEEDS the evidence; ADD REPAIRS the KB. The
+    withhold-from-context MECHANISM (`TextContentAbsence`/`KnowledgeAbsence`) is **retained for the
+    offline sweep** — only the interactive per-question condition selector and the SCOPE contrast were
+    removed. **RQ2 is quantified via the offline bank aggregate** (question bank x N runs x {full,
+    content-withheld, knowledge-withheld}, graded vs full reference; a report figure); **the
+    interactive tool shows RQ2 only qualitatively (the single-run REMOVE demo)**. There is **no
+    `absence_leverage` / `fabrication_induction` scalar** and **no per-claim stability / slot / variant
+    machinery** — these are dropped. Multi-run proportions carry `SE=sqrt(p(1-p)/N)` (not the ~0.5
+    Bernoulli std); **N=20 is a floor**.
 16. **Support-frequency is observational, not causal (SPEC-text §4.8).** `support_frequency[id]` =
     fraction of N runs a KG node/triplet was **used** (lies on the support path of >=1 grounded
     claim). It measures "how often grounding routes through this item", **NOT** causal leverage.
@@ -237,15 +246,23 @@ image axis is curtailed (artwork→taxa→drop) to protect the demo + write-up.
   mock; **P0 grounding stub** (`backend.ground_response` raises `NotImplementedError`).
   *SPEC:* §4.5, §3.1(seam 3).
 - **UI3 — Wire app to precomputed runs** · P1 · deps: UI2, GR11
-  *Delivers:* app loads `data/runs/*.json`; question/condition selector. *SPEC:* §8, §4.5.
+  *Delivers:* app loads `data/runs/*.json`; **question selector** (FULL-condition runs for the
+  interactive modes — no per-question condition toggle; the {content-withheld, knowledge-withheld}
+  runs feed the offline RQ2 aggregate, not an interactive selector). *SPEC:* §8, §4.5.
 - **UI4 — Analytics panel (two modes) + Trust indicator** · P2 · deps: UI3, EX4, EX3, EX5
   *Delivers:* `app/charts/{status_dist,repair_history,coverage,support_frequency}.py` (one
   `make_*_figure()` each), with a **single-run / multi-run mode toggle**. **Single-run:** the one
-  run's **status %/counts** (no SE) + per-claim support-path highlight + per-claim status.
-  **Multi-run (#5, N selectable, default 20):** the **status distribution as mean +/- SE** column
-  chart (answer-level per-run fractions) + **support-frequency** rendered as **node-size/edge-weight**
-  on the subgraph (observational, NOT causal); modality-coverage; repair-history + the
-  **repair-leverage count**. **Trust-pillar indicator** rendering `GroundingRun.error_rates`
+  run's **status %/counts** (no SE) + per-claim support-path highlight + per-claim status + **two
+  interactive demos: (a) REMOVE a description/triplet from the generation context → re-run → watch
+  the answer fabricate (qualitative RQ2); (b) ADD a true missing fact to the KG → re-run → watch the
+  claim flip to grounded + show the repair_leverage count (RQ3)**.
+  **Multi-run (#5, N selectable, default 20, FULL condition):** the **FULL-condition status
+  distribution as mean +/- SE** column chart (answer-level per-run fractions; reproducibility of
+  grounding) + **support-frequency** rendered as **node-size/edge-weight** on the subgraph
+  (observational, NOT causal); modality-coverage; repair-history + the **repair-leverage count**.
+  **Drop the multi-run condition selector** {full / content-withheld / knowledge-withheld} — the
+  modality contrast (RQ2) is the offline sweep aggregate (EX4), reported as a figure, NOT an
+  interactive toggle. **Trust-pillar indicator** rendering `GroundingRun.error_rates`
   (per-modality classifier error, always visible) with the caption **"calibrated on the curated QA
   set"**; a **borderline-margin chip near `tau`** (from the persisted `entailment_score`).
   **Prominent small-N caveat** (SE of a proportion; N=20 a floor). Bars start at y=0; node sizing by
@@ -307,11 +324,13 @@ image axis is curtailed (artwork→taxa→drop) to protect the demo + write-up.
   is in the image axis.)*
   *SPEC:* §4.7.
 - **GR11 — Precompute pipeline + runs store** · P1 · deps: GR4, GR9
-  *Delivers:* batch script: (question × {full, manifest entry} × **N runs**) assemble→generate→ground
-  → `data/runs/<run_id>.json` (the N runs per question/condition; `condition`/`sample_index` set);
-  records the **generator seeding scheme `seed = f(question_id, condition, sample_index)`**; cached by
-  input hash; **deterministic given the seeds** (generator) and given fixed answer texts (verifier).
-  *SPEC:* §8, §10, §4.8, §4.3.
+  *Delivers:* batch script: (question × **{full, content-withheld, knowledge-withheld}** × **N runs**)
+  assemble→generate→ground → `data/runs/<run_id>.json` (the N runs per question/condition;
+  `condition`/`sample_index` set); withhold-from-context, **graded vs the full reference**. This sweep
+  IS the **RQ2 modality-contrast aggregate source** (the claim-status distribution shift across
+  conditions, reported as a figure — not an interactive toggle). Records the **generator seeding scheme
+  `seed = f(question_id, condition, sample_index)`**; cached by input hash; **deterministic given the
+  seeds** (generator) and given fixed answer texts (verifier). *SPEC:* §8, §10, §4.8, §4.3.
 
 ### TEST
 - **TS1 — §6 mechanical tests (P0 subset)** · P0 · deps: S2, DA1, PT1
@@ -337,20 +356,25 @@ image axis is curtailed (artwork→taxa→drop) to protect the demo + write-up.
   by `claim_id` **within that one answer's before/after** (regeneration-based; the gap-repair flow:
   true claim fabricated due to KG gap → add triplet → re-run → grounded). *SPEC:* §4.6.
 - **EX5 — Diagnostics aggregation `diagnostics.py`** · P2 · deps: GR11
-  *Delivers:* the two-mode diagnostics (§4.8). **Single-run:** `SingleRunStatusSummary` — one run's
-  status counts/percentages, **no SE**. **Multi-run (N runs):** `AnswerDiagnostics` —
-  **answer-level status mean +/- SE** (per-run fraction of claims that are
-  retrieved/reasoned-supportable/fabricated, computed per run, then mean+SE across the N runs) +
-  **support-frequency** (per KG node/triplet = fraction of N runs the item was **used** = lies on the
-  support path of >=1 grounded claim; **observational, NOT causal**, aligned by stable KG-item ID).
-  **Claims are NOT aligned across runs.** Report **SE/CI of the proportion** (`SE=sqrt(p(1-p)/N)`)
-  with a **prominent small-N caveat** (N=20 is a floor). **Drop slot/variant, leverage/induction
-  scalars, per-claim stability.** *SPEC:* §4.8.
+  *Delivers:* the two-mode **per-question** diagnostics (§4.8). **Single-run:** `SingleRunStatusSummary`
+  — one run's status counts/percentages, **no SE**. **Multi-run (N runs, FULL condition):**
+  `AnswerDiagnostics` — **FULL-condition answer-level status mean +/- SE** (per-run fraction of claims
+  that are retrieved/reasoned-supportable/fabricated, computed per run, then mean+SE across the N runs)
+  + **support-frequency** (per KG node/triplet = fraction of N runs the item was **used** = lies on the
+  support path of >=1 grounded claim; **observational, NOT causal**, aligned by stable KG-item ID) +
+  the **repair_leverage** count (EX3). **Claims are NOT aligned across runs.** Report **SE/CI of the
+  proportion** (`SE=sqrt(p(1-p)/N)`) with a **prominent small-N caveat** (N=20 is a floor). The
+  **modality-condition aggregation** {full, content-withheld, knowledge-withheld} (the RQ2 contrast)
+  belongs to the **offline experiment (EX4)**, NOT the per-question diagnostics. **Drop slot/variant,
+  leverage/induction scalars, per-claim stability.** *SPEC:* §4.8.
 - **EX4 — Phase A BOOKS runs + controls + pilot (= M-BOOKS)** · P2 · deps: GR11, GR10, TS2, EX1, EX2
-  *Delivers:* run precompute over books bank×manifests; **negative / false-claim / manipulation /
-  modality-strength controls** on real data; empirical pilot (~10 q); per-slice claim-status
-  distributions + fabrication shifts. **M-BOOKS is declared ONLY when these controls PASS — not
-  merely run** (false-claim control non-negotiable). *SPEC:* §5, §6, §8.
+  *Delivers:* run precompute over books bank × **{full, content-withheld, knowledge-withheld}** (the
+  RQ2 sweep, GR11); the **RQ2 modality-contrast aggregate** — the claim-status distribution shift
+  across conditions, reported as a **figure** (this aggregate, not an interactive toggle, IS the RQ2
+  result); **negative / false-claim / manipulation / modality-strength controls** on real data;
+  empirical pilot (~10 q); per-slice claim-status distributions + fabrication shifts. **M-BOOKS is
+  declared ONLY when these controls PASS — not merely run** (false-claim control non-negotiable).
+  *SPEC:* §5, §6, §8.
 - **EX6 — Case studies + write-up + deliverables** · P2 · deps: EX4 (+ image results if produced)
   *Delivers:* 2–3 end-to-end repair walkthroughs; **IEEE-VIS intermediate + scientific reports**
   including the mandated elements — teaser figure, three explicit contribution bullets, the
