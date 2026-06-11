@@ -24,7 +24,8 @@ BORDER = "#30363d"
 TEXT = "#c9d1d9"
 MUTED = "#8b949e"
 FAINT = "#6e7681"
-ACCENT = "#58a6ff"  # the single selection-outline colour (identity != hue)
+ACCENT = "#58a6ff"  # claim selection-outline colour (identity != hue)
+KG_SELECT = "#ff9d4d"  # KG-item (node/triplet) selection highlight — high-contrast, distinct from ACCENT and the status hues
 
 MONO = "'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', 'Roboto Mono', monospace"
 
@@ -44,11 +45,6 @@ STATUS_UI_LABELS: dict[str, str] = {
     ClaimStatus.FABRICATED.value: "Fabricated",
 }
 
-# Fourth segment for per-condition stacked bars: a claim not emitted by a draw
-# (distinct from fabricated). Grey — not a status hue.
-ABSENT = "absent"
-ABSENT_COLOR = "#9aa3ad"  # pastel grey
-
 # Ordered grades for filters / charts (the THREE real grades; "proposed" is the
 # input universe, not a fourth grade).
 STATUS_ORDER: list[str] = [
@@ -56,11 +52,6 @@ STATUS_ORDER: list[str] = [
     ClaimStatus.REASONED_SUPPORTABLE.value,
     ClaimStatus.FABRICATED.value,
 ]
-
-# Stacked-bar segment order (the three grades + absent).
-STACK_ORDER: list[str] = [*STATUS_ORDER, ABSENT]
-STACK_COLORS: dict[str, str] = {**STATUS_COLORS, ABSENT: ABSENT_COLOR}
-STACK_LABELS: dict[str, str] = {**STATUS_UI_LABELS, ABSENT: "Absent"}
 
 
 def status_color(status: str) -> str:

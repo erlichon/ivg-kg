@@ -15,7 +15,7 @@ from dash import html
 
 from app import theme
 from ivg_kg.config import SUBGRAPH_NODE_CAP
-from ivg_kg.schema import ClaimRecord, ClaimStatus, SupportSource
+from ivg_kg.schema import ClaimRecord, ClaimStatus
 
 PLACEHOLDER_IMG = "/assets/placeholder_entity.svg"
 
@@ -60,8 +60,8 @@ BASE_STYLESHEET: list[dict] = [
             "label": "data(label)",
             "curve-style": "bezier",
             "target-arrow-shape": "triangle",
-            "target-arrow-color": theme.FAINT,
-            "line-color": theme.FAINT,
+            "target-arrow-color": theme.MUTED,
+            "line-color": theme.MUTED,
             "font-family": theme.MONO,
             "font-size": "9px",
             # bright label on its own dark pill, so it stays readable over the
@@ -73,7 +73,7 @@ BASE_STYLESHEET: list[dict] = [
             "text-background-shape": "round-rectangle",
             "text-rotation": "autorotate",
             "text-margin-y": -1,
-            "width": 1.5,
+            "width": 2.4,
         },
     },
     {
@@ -82,10 +82,28 @@ BASE_STYLESHEET: list[dict] = [
         "style": {"opacity": 0.45},
     },
     {
-        # injected edges (added by the analyst — CogMG) shown green + dashed.
-        "selector": 'edge[injected = "1"]',
+        # edge withheld from the GENERATION context but still in the verification
+        # reference (generation-only removal): dimmed + dashed.
+        "selector": 'edge[scope_state = "ver_only"]',
+        "style": {"line-color": theme.FAINT, "line-style": "dashed",
+                  "target-arrow-color": theme.FAINT, "opacity": 0.5, "width": 1.5},
+    },
+    {
+        # edge in the GENERATION context only (added generation-only, not in the
+        # verification reference -> the verifier cannot confirm it): green dashed.
+        "selector": 'edge[scope_state = "gen_only"]',
         "style": {"line-color": "#3fb950", "line-style": "dashed",
                   "target-arrow-color": "#3fb950", "width": 2.5},
+    },
+    {
+        # a newly added entity (CogMG): accent dashed outline.
+        "selector": 'node[added = "1"]',
+        "style": {"border-color": theme.ACCENT, "border-width": 2, "border-style": "dashed"},
+    },
+    {
+        # an entity whose content (description/image) was removed: muted dashed.
+        "selector": "node[content_state]",
+        "style": {"border-style": "dashed", "border-color": theme.FAINT},
     },
 ]
 
@@ -93,8 +111,9 @@ BASE_STYLESHEET: list[dict] = [
 def support_edges_and_nodes(claim: ClaimRecord) -> tuple[list[str], list[str], str | None]:
     """Return (support_edge_ids, support_node_ids, anchor_node_id) for a claim.
 
-    Edge ids follow the "<subj>-<prop>-<obj>" convention. Direct-triple claims
-    (no stored path) have their supporting edge reconstructed from claim_key.
+    Reads the claim's support path (grounding_path) uniformly: every grounded
+    claim carries it (a single-edge path for a DIRECT_TRIPLE claim, the full path
+    for a multi-hop one). Edge ids follow the "<subj>-<prop>-<obj>" convention.
     """
     anchor = claim.linked_entities[0].id if claim.linked_entities else None
     if claim.grounding_path.edges:
@@ -103,12 +122,7 @@ def support_edges_and_nodes(claim: ClaimRecord) -> tuple[list[str], list[str], s
             for pe in claim.grounding_path.edges
         ]
         return eids, list(claim.grounding_path.node_ids), anchor
-    if claim.support_source == SupportSource.DIRECT_TRIPLE and claim.claim_key:
-        parts = claim.claim_key.split("|")
-        if len(parts) == 3 and parts[2].startswith("Q"):
-            head, rel, val = parts
-            return [f"{head}-{rel}-{val}"], [head, val], anchor
-    return [], ([anchor] if anchor else []), anchor
+    return [], list(claim.grounding_path.node_ids) or ([anchor] if anchor else []), anchor
 
 
 def highlight_stylesheet(
@@ -164,6 +178,57 @@ def highlight_stylesheet(
                 "font-weight": "bold",
             },
         })
+    return list(base) + appended
+
+
+def support_frequency_stylesheet(
+    base: list[dict], support_frequency: dict[str, float]
+) -> list[dict]:
+    """Return base + appended selectors sizing nodes/edges by support-frequency.
+
+    OBSERVATIONAL importance (§4.8): node size and edge width scale with the
+    fraction of the N runs in which that KG item was used to ground a claim.
+    Entity keys size NODES; triplet keys "<subj>|<prop>|<obj>" size the matching
+    EDGE (id "<subj>-<prop>-<obj>"). PURE — base is never mutated.
+    """
+    appended: list[dict] = []
+    for item, freq in support_frequency.items():
+        f = max(0.0, min(1.0, freq))
+        if "|" in item:  # triplet -> edge width
+            edge_id = item.replace("|", "-")
+            appended.append({
+                "selector": f'edge[id = "{edge_id}"]',
+                "style": {"width": 1.5 + 7.0 * f, "opacity": 0.35 + 0.6 * f},
+            })
+        else:  # entity -> node area (width == height)
+            size = 40 + 56 * f
+            appended.append({
+                "selector": f'node[id = "{item}"]',
+                "style": {"width": size, "height": size, "opacity": 0.45 + 0.55 * f},
+            })
+    return list(base) + appended
+
+
+def kg_item_highlight_stylesheet(base: list[dict], selected_items: list[str]) -> list[dict]:
+    """Append accent highlights for selected KG items (multi-run); PURE.
+
+    Mirrors the claim-brush: a selected entity gets an accent outline, a selected
+    triplet ("<s>|<p>|<o>") gets a thick accent edge (id "<s>-<p>-<o>").
+    """
+    appended: list[dict] = []
+    for item in selected_items or []:
+        if "|" in item:
+            eid = item.replace("|", "-")
+            appended.append({
+                "selector": f'edge[id = "{eid}"]',
+                "style": {"line-color": theme.KG_SELECT, "target-arrow-color": theme.KG_SELECT,
+                          "line-style": "solid", "width": 7, "z-index": 30, "opacity": 1},
+            })
+        else:
+            appended.append({
+                "selector": f'node[id = "{item}"]',
+                "style": {"border-color": theme.KG_SELECT, "border-width": 6, "opacity": 1},
+            })
     return list(base) + appended
 
 
@@ -246,31 +311,58 @@ def node_detail_content(node_data: dict | None) -> html.Div:
     if desc:
         body.append(html.Div(desc, style={"color": theme.MUTED, "fontSize": "0.8em",
                                            "lineHeight": "1.4"}))
+    if kind != "literal":
+        content_state = node_data.get("content_state")
+        if content_state:
+            note = ("content withheld from the model (still in the verifier's reference)"
+                    if content_state == "gen"
+                    else "content removed from the KG (also gone from the verifier)")
+            body.append(html.Div(f"— {note}", style={"color": theme.FAINT,
+                                 "fontSize": "0.72em", "fontStyle": "italic",
+                                 "marginTop": "4px"}))
+        else:
+            body.append(html.Button(
+                "✕ remove this entity's content (description/image)",
+                id={"type": "remove-content", "entity": node_data.get("id")},
+                n_clicks=0,
+                style={"background": theme.PANEL,
+                       "color": theme.STATUS_COLORS[ClaimStatus.FABRICATED.value],
+                       "border": f"1px solid {theme.STATUS_COLORS[ClaimStatus.FABRICATED.value]}",
+                       "borderRadius": "4px", "padding": "3px 8px", "cursor": "pointer",
+                       "fontFamily": theme.MONO, "fontSize": "0.72em", "marginTop": "6px"},
+            ))
     return html.Div(
         [media, html.Div(body, style={"marginLeft": "12px"})],
         style={"display": "flex", "alignItems": "flex-start"},
     )
 
 
+_SCOPE_STATE_NOTE = {
+    "ver_only": "withheld from the model (generation-only); still in the verifier's reference",
+    "gen_only": "in the model's context only (added generation-only); the verifier cannot confirm it",
+}
+
+
 def edge_detail_content(edge_data: dict, base_triple_ids: set[str]) -> html.Div:
-    """Edge-detail pane: show the triple + a remove control (base triples only)."""
+    """Edge-detail pane: show the triple + its scope state + a remove control."""
     label = edge_data.get("label", "")
     pid = edge_data.get("property_id", "")
-    injected = edge_data.get("injected") == "1"
+    scope_state = edge_data.get("scope_state", "both")
     rows: list = [
         html.Div(
             [html.Span("triple ", style={"color": theme.FAINT, "fontSize": "0.72em"}),
              html.Span(f"{edge_data.get('source', '?')} —[{label}]→ {edge_data.get('target', '?')}",
                        style={"color": theme.TEXT, "fontSize": "0.82em", "fontFamily": theme.MONO})],
-            style={"marginBottom": "8px"},
+            style={"marginBottom": "6px"},
         ),
     ]
-    if injected:
-        rows.append(html.Div("injected (CogMG) — remove it from the inject panel below.",
-                             style={"color": "#3fb950", "fontSize": "0.74em"}))
-    elif pid in base_triple_ids:
+    if scope_state in _SCOPE_STATE_NOTE:
+        rows.append(html.Div(f"— {_SCOPE_STATE_NOTE[scope_state]}",
+                             style={"color": theme.FAINT, "fontSize": "0.72em",
+                                    "fontStyle": "italic", "marginBottom": "6px"}))
+    if pid in base_triple_ids:
         rows.append(html.Button(
-            "✕ remove this triple from the graph",
+            "✕ remove this triple (scope from the toggle below)",
             id={"type": "remove-edge", "triple": pid},
             n_clicks=0,
             style={"background": theme.PANEL_ALT,
@@ -279,6 +371,9 @@ def edge_detail_content(edge_data: dict, base_triple_ids: set[str]) -> html.Div:
                    "borderRadius": "4px", "padding": "3px 10px", "cursor": "pointer",
                    "fontFamily": theme.MONO, "fontSize": "0.74em"},
         ))
+    else:
+        rows.append(html.Div("added triple — remove it from the edits list below.",
+                             style={"color": "#3fb950", "fontSize": "0.74em"}))
     return html.Div(rows)
 
 
@@ -291,9 +386,11 @@ def get_subgraph_panel(elements: list[dict]) -> html.Div:
                     html.Span("SUBGRAPH", style={"color": theme.MUTED, "fontSize": "0.75em",
                                                  "letterSpacing": "0.1em"}),
                     html.Button(
-                        "⟲ reset view",
+                        "⟲ reset",
                         id="reset-view",
                         n_clicks=0,
+                        title="Reset the graph: clear all KG edits + selections and "
+                              "restore the overview.",
                         style={
                             "float": "right", "background": theme.PANEL_ALT,
                             "color": theme.MUTED, "border": f"1px solid {theme.BORDER}",

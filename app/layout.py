@@ -12,18 +12,17 @@ from __future__ import annotations
 from dash import dcc, html
 
 from app import theme
-from app.panels.analytics import DEFAULT_N, get_analytics_panel
+from app.panels.analytics import get_analytics_panel
 from app.panels.answer import get_answer_panel
 from app.panels.repair import get_repair_panel
 from app.panels.subgraph import get_subgraph_panel
 from ivg_kg.mock.fixtures import (
-    ALL_TRIPLE_IDS,
-    mock_answer_diagnostics,
     mock_grounding_run,
+    mock_single_run_summary,
     mock_subgraph_elements,
 )
 from ivg_kg.perturbation import available_perturbations
-from ivg_kg.schema import AnswerDiagnostics, GroundingRun
+from ivg_kg.schema import GroundingRun, SingleRunStatusSummary
 
 
 def get_perturbation_controls() -> html.Div:
@@ -125,9 +124,9 @@ def _settings_panel() -> html.Div:
                     html.Span("generation settings", style={"color": theme.TEXT,
                                                             "fontWeight": "bold"}),
                     theme.info_icon(
-                        "Parameters for the single answer generation (one answer per "
-                        "condition). The verifier then runs N times over that answer to "
-                        "estimate grading variance (N is set in Analytics). Mock & "
+                        "Parameters for the GENERATOR (the stochastic system under test). "
+                        "It is drawn N times per condition; the deterministic verifier "
+                        "grades each draw once. N is set in Analytics. Mock & "
                         "presentational here; reported figures run off precomputed offline "
                         "run-sets (SPEC-text §4.6 / §10)."
                     ),
@@ -167,9 +166,10 @@ def _settings_panel() -> html.Div:
                        "flexWrap": "wrap"},
             ),
             html.Div(
-                "Mock: parameters are presentational. The answer is generated once "
-                "(full context); the verifier then runs N times over its claims — N is "
-                "set in Analytics. Reported figures come from precomputed offline run-sets.",
+                "Mock: parameters are presentational. The generator is drawn N times "
+                "per condition (the displayed answer is FULL draw #0); the deterministic "
+                "verifier grades each draw once — N is set in Analytics. Reported figures "
+                "come from precomputed offline run-sets.",
                 style={"color": theme.FAINT, "fontSize": "0.72em", "marginTop": "10px"},
             ),
         ],
@@ -185,21 +185,21 @@ def _settings_panel() -> html.Div:
 def get_layout(
     run: GroundingRun | None = None,
     elements: list[dict] | None = None,
-    diagnostics: AnswerDiagnostics | None = None,
+    single_summary: SingleRunStatusSummary | None = None,
 ) -> html.Div:
     """Compose the three-panel mockup layout with the shared store."""
     if run is None:
         run = mock_grounding_run()
     if elements is None:
         elements = mock_subgraph_elements()
-    if diagnostics is None:
-        diagnostics = mock_answer_diagnostics(DEFAULT_N)
+    if single_summary is None:
+        single_summary = mock_single_run_summary()
 
     return html.Div(
         [
             dcc.Store(id="selected-claims", data=[]),
-            dcc.Store(id="present-triples", data=list(ALL_TRIPLE_IDS)),
-            dcc.Store(id="injected", data=[]),
+            dcc.Store(id="selected-kg-items", data=[]),
+            dcc.Store(id="kg-edits", data=[]),
             _header(run),
             _settings_panel(),
             html.Div(
@@ -208,7 +208,7 @@ def get_layout(
                              style={"flex": "1.05", "minWidth": "0"}),
                     html.Div(get_subgraph_panel(elements),
                              style={"flex": "1.5", "minWidth": "0"}),
-                    html.Div(get_analytics_panel(run, diagnostics),
+                    html.Div(get_analytics_panel(run, single_summary),
                              style={"flex": "1.1", "minWidth": "0"}),
                 ],
                 style={"display": "flex", "gap": "14px", "padding": "0 18px 14px 18px",

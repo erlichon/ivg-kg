@@ -11,11 +11,9 @@ import dash
 
 from app.callbacks import register_callbacks
 from app.layout import get_layout
-from app.panels.analytics import DEFAULT_N
 from ivg_kg.mock.fixtures import (
-    N_CHOICES,
-    mock_answer_diagnostics,
     mock_grounding_run,
+    mock_single_run_summary,
     mock_subgraph_elements,
 )
 
@@ -24,11 +22,11 @@ def make_app() -> dash.Dash:
     """Build and return the wired Dash app (no server started)."""
     run = mock_grounding_run()
     elements = mock_subgraph_elements()
-    diagnostics_by_n = {n: mock_answer_diagnostics(n) for n in N_CHOICES}
+    single_summary = mock_single_run_summary()
 
     _app = dash.Dash(__name__, title="ivg-kg mockup", suppress_callback_exceptions=True)
-    _app.layout = get_layout(run, elements, diagnostics_by_n[DEFAULT_N])
-    register_callbacks(_app, run, elements, diagnostics_by_n)
+    _app.layout = get_layout(run, elements, single_summary)
+    register_callbacks(_app, run, elements)
     return _app
 
 

@@ -48,8 +48,15 @@ WDQS_USER_AGENT: str = (
 # Local/open LLM used as the POC default behind BaseAIClient.
 LOCAL_LLM_MODEL_ID: str = "meta-llama/Llama-3.2-3B-Instruct"
 
-# MiniCheck entailment model (Apache-2.0); used by BaseEntailmentGate.
-MINICHECK_MODEL_ID: str = "bespokelabs/Bespoke-MiniCheck-7B"
+# Entailment models for the VERIFIER (deterministic measurement instrument, NOT
+# the generator). Verifier choice is ACCURACY-FIRST (latency is second-order).
+# TODO(verifier-model): decision FINALIZED (SPEC-text §4.3) -- DeBERTa-v3-large on
+# the LIVE path (the live path does verify live), MiniCheck-7B for OFFLINE
+# precompute / calibration; cache verification by distinct evidence-pair. The
+# verifier must stay a DIFFERENT model family from the generator (no
+# self-verification). Mock behavior is unaffected by these ids.
+MINICHECK_MODEL_ID: str = "bespokelabs/Bespoke-MiniCheck-7B"  # offline precompute / calibration
+DEBERTA_NLI_MODEL_ID: str = "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli"  # live
 
 # post-M-BOOKS (gated image axis) — not used in P0
 VLM_MODEL_ID: str = "Qwen/Qwen2.5-VL-3B-Instruct"
