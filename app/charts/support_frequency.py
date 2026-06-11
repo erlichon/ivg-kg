@@ -23,7 +23,7 @@ def make_support_frequency_figure(
     names = [labels.get(k, k) for k, _ in items]
     values = [round(100 * v, 0) for _, v in items]
     # triplets (edges) vs entities (nodes) get different hues so the two read apart
-    colors = [theme.ACCENT if "|" in k else "#7d8590" for k, _ in items]
+    colors = [theme.KG_SELECT if "|" in k else "#7d8590" for k, _ in items]
 
     fig = go.Figure(
         go.Bar(

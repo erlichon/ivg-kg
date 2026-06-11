@@ -44,6 +44,18 @@ _SCOPE_INFO = (
     "generation-only does NOT repair c3 (still unverifiable); generation+verification "
     "does."
 )
+_INFO_LEVERAGE = (
+    "Repair-leverage (RQ3).\n"
+    "WHAT: the COUNT of the answer's claims whose verdict flips FABRICATED -> grounded.\n"
+    "WHEN: after you restore missing evidence to the KG with "
+    "'generation + verification' scope and the answer is RE-RUN. A 'generation only' "
+    "edit does NOT count -- the verifier still cannot confirm it (the claim stays "
+    "unverifiable).\n"
+    "HOW: compared to the ORIGINAL answer (no edits), aligned by claim_id within this "
+    "one before/after pair; regeneration-based (not a deterministic re-grounding).\n"
+    "Here the only originally-fabricated claim is the father's birth date (c3) -- the "
+    "KG has a gap -- so restoring the date (gen+verification) repairs +1 (c3)."
+)
 
 
 def _btn(color: str) -> dict:
@@ -169,25 +181,27 @@ def render_repair_body(edits: list[dict] | None = None) -> html.Div:
     )
 
     rr = repair_result(edits)
-    n = grounded_count(edits)
-    flipped = (
-        f"+{rr.repair_leverage} repaired: {', '.join(rr.repaired_claim_ids)}"
-        if rr.repair_leverage else "+0 repaired (no fabricated claim restored yet)"
+    before = grounded_count(None)
+    now = grounded_count(edits)
+    lev_txt = (
+        f"+{rr.repair_leverage}  ({', '.join(rr.repaired_claim_ids)})"
+        if rr.repair_leverage else "+0"
     )
     readout = html.Div(
         [
-            html.Span("repair-leverage ", style={"color": theme.MUTED, "fontSize": "0.8em"}),
-            html.Span(flipped, style={"color": "#3fb950" if rr.repair_leverage else theme.MUTED,
-                                      "fontWeight": "bold", "fontSize": "0.95em"}),
-            html.Span("  (claims FABRICATED -> grounded vs the original answer, on "
-                      "restore + re-run)",
+            html.Span("repair-leverage  ", style={"color": theme.MUTED, "fontSize": "0.8em"}),
+            html.Span(lev_txt, style={"color": "#3fb950" if rr.repair_leverage else theme.MUTED,
+                                      "fontWeight": "bold", "fontSize": "1.0em"}),
+            html.Span("  claims flipped FABRICATED -> grounded by these edits",
                       style={"color": theme.FAINT, "fontSize": "0.72em"}),
+            theme.info_icon(_INFO_LEVERAGE),
             html.Div(
                 [
                     html.Span("grounded ", style={"color": theme.MUTED, "fontSize": "0.78em"}),
-                    html.Span(f"{n}/6", style={"color": theme.TEXT, "fontWeight": "bold"}),
-                    html.Span("  claims now (graded against the CURRENT reference)  ·  "
-                              "scripted visual mock",
+                    html.Span(f"{before}/6 → {now}/6",
+                              style={"color": theme.TEXT, "fontWeight": "bold"}),
+                    html.Span("   (original answer → after the edits, graded vs the "
+                              "CURRENT reference)  ·  scripted visual mock",
                               style={"color": theme.FAINT, "fontSize": "0.72em"}),
                 ],
                 style={"marginTop": "3px"},

@@ -24,7 +24,8 @@ BORDER = "#30363d"
 TEXT = "#c9d1d9"
 MUTED = "#8b949e"
 FAINT = "#6e7681"
-ACCENT = "#58a6ff"  # the single selection-outline colour (identity != hue)
+ACCENT = "#58a6ff"  # claim selection-outline colour (identity != hue)
+KG_SELECT = "#ff9d4d"  # KG-item (node/triplet) selection highlight — high-contrast, distinct from ACCENT and the status hues
 
 MONO = "'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', 'Roboto Mono', monospace"
 

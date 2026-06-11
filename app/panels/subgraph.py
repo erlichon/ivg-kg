@@ -60,8 +60,8 @@ BASE_STYLESHEET: list[dict] = [
             "label": "data(label)",
             "curve-style": "bezier",
             "target-arrow-shape": "triangle",
-            "target-arrow-color": theme.FAINT,
-            "line-color": theme.FAINT,
+            "target-arrow-color": theme.MUTED,
+            "line-color": theme.MUTED,
             "font-family": theme.MONO,
             "font-size": "9px",
             # bright label on its own dark pill, so it stays readable over the
@@ -73,7 +73,7 @@ BASE_STYLESHEET: list[dict] = [
             "text-background-shape": "round-rectangle",
             "text-rotation": "autorotate",
             "text-margin-y": -1,
-            "width": 1.5,
+            "width": 2.4,
         },
     },
     {
@@ -221,13 +221,13 @@ def kg_item_highlight_stylesheet(base: list[dict], selected_items: list[str]) ->
             eid = item.replace("|", "-")
             appended.append({
                 "selector": f'edge[id = "{eid}"]',
-                "style": {"line-color": theme.ACCENT, "target-arrow-color": theme.ACCENT,
-                          "width": 5, "z-index": 25, "opacity": 1},
+                "style": {"line-color": theme.KG_SELECT, "target-arrow-color": theme.KG_SELECT,
+                          "line-style": "solid", "width": 7, "z-index": 30, "opacity": 1},
             })
         else:
             appended.append({
                 "selector": f'node[id = "{item}"]',
-                "style": {"border-color": theme.ACCENT, "border-width": 5, "opacity": 1},
+                "style": {"border-color": theme.KG_SELECT, "border-width": 6, "opacity": 1},
             })
     return list(base) + appended
 
@@ -386,9 +386,11 @@ def get_subgraph_panel(elements: list[dict]) -> html.Div:
                     html.Span("SUBGRAPH", style={"color": theme.MUTED, "fontSize": "0.75em",
                                                  "letterSpacing": "0.1em"}),
                     html.Button(
-                        "⟲ reset view",
+                        "⟲ reset",
                         id="reset-view",
                         n_clicks=0,
+                        title="Reset the graph: clear all KG edits + selections and "
+                              "restore the overview.",
                         style={
                             "float": "right", "background": theme.PANEL_ALT,
                             "color": theme.MUTED, "border": f"1px solid {theme.BORDER}",

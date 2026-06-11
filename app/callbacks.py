@@ -66,14 +66,17 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
         Output("selected-claims", "data"),
         Input({"type": "claim-row", "claim_id": ALL}, "n_clicks"),
         Input({"type": "claim-span", "claim_id": ALL}, "n_clicks"),
+        Input("reset-view", "n_clicks"),
         State("selected-claims", "data"),
         prevent_initial_call=True,
     )
-    def toggle_selection(_rows, _spans, current):  # noqa: ANN001
-        trig = dash.ctx.triggered_id
-        if not trig or not isinstance(trig, dict):
-            raise PreventUpdate
+    def toggle_selection(_rows, _spans, _reset, current):  # noqa: ANN001
         if not dash.ctx.triggered or not dash.ctx.triggered[0].get("value"):
+            raise PreventUpdate
+        trig = dash.ctx.triggered_id
+        if trig == "reset-view":
+            return []
+        if not isinstance(trig, dict):
             raise PreventUpdate
         cid = trig.get("claim_id")
         if cid not in claims_by_id:
@@ -86,14 +89,17 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
     @app.callback(
         Output("selected-kg-items", "data"),
         Input({"type": "kg-item", "item": ALL}, "n_clicks"),
+        Input("reset-view", "n_clicks"),
         State("selected-kg-items", "data"),
         prevent_initial_call=True,
     )
-    def toggle_kg_item(_n, current):  # noqa: ANN001
+    def toggle_kg_item(_n, _reset, current):  # noqa: ANN001
+        if not dash.ctx.triggered or not dash.ctx.triggered[0].get("value"):
+            raise PreventUpdate
         trig = dash.ctx.triggered_id
-        if not isinstance(trig, dict) or not dash.ctx.triggered or not dash.ctx.triggered[0].get(
-            "value"
-        ):
+        if trig == "reset-view":
+            return []
+        if not isinstance(trig, dict):
             raise PreventUpdate
         item = trig.get("item")
         sel = list(current or [])
@@ -165,11 +171,13 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
         prevent_initial_call=True,
     )
     def update_elements(edits, node_data, _reset):  # noqa: ANN001
-        full = editable_elements(edits)
         prop = dash.ctx.triggered[0]["prop_id"] if dash.ctx.triggered else ""
+        if prop.startswith("reset-view"):
+            return editable_elements(None), _LAYOUT  # reset clears edits -> base overview
+        full = editable_elements(edits)
         if prop.endswith("tapNodeData") and node_data:
             return ego_elements(full, node_data["id"]), _LAYOUT  # zoom to node
-        return full, _LAYOUT  # full edited graph (edit / reset / deselect)
+        return full, _LAYOUT  # full edited graph (edit / deselect)
 
     # ---- Det: tap node / edge -> entity-or-edge detail ----------------------
     @app.callback(
@@ -207,6 +215,7 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
         Input("entity-apply", "n_clicks"),
         Input({"type": "remove-content", "entity": ALL}, "n_clicks"),
         Input({"type": "remove-edit", "idx": ALL}, "n_clicks"),
+        Input("reset-view", "n_clicks"),
         State("edit-scope", "value"),
         State("inject-subject", "value"),
         State("inject-relation", "value"),
@@ -217,11 +226,14 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
         prevent_initial_call=True,
     )
     def apply_edit(  # noqa: ANN001, PLR0913
-        _rm, _add, _inj, _ent, _rc, _re, scope, subject, relation, value, label, desc, current
+        _rm, _add, _inj, _ent, _rc, _re, _reset, scope, subject, relation, value, label, desc,
+        current,
     ):
         trig = dash.ctx.triggered_id
         if not dash.ctx.triggered or not dash.ctx.triggered[0].get("value"):
             raise PreventUpdate
+        if trig == "reset-view":
+            return []  # reset clears all KG edits
         scope = scope if scope in ("gen", "both") else "both"
         edits = list(current or [])
         if trig == "inject-apply":

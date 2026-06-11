@@ -173,7 +173,7 @@ def _support_frequency_list(support_frequency: dict[str, float], labels: dict[st
         html.Button(
             [
                 html.Span("◆ " if "|" in item else "● ",
-                          style={"color": theme.ACCENT if "|" in item else theme.MUTED}),
+                          style={"color": theme.KG_SELECT if "|" in item else theme.MUTED}),
                 html.Span(labels.get(item, item), style={"color": theme.TEXT}),
                 html.Span(f"  {freq:.0%}", style={"color": theme.MUTED}),
             ],

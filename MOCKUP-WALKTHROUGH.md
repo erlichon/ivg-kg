@@ -103,10 +103,13 @@ content-withheld a mild rise, knowledge-withheld ≈ 84% (structure withheld hur
 - **1st-degree neighbourhood under a node cap** (`config.SUBGRAPH_NODE_CAP` = 40); the
   Chopin graph is small, so all nodes show.
 - **Tap a node → zoom + entity-detail** (bottom-middle): static placeholder image +
-  label/description, and a **✕ remove this entity's content** button (scoped). *⟲ reset
-  view* restores the overview. → `screenshots/04-node-zoom-detail.png`
+  label/description, and a **✕ remove this entity's content** button (scoped).
+  → `screenshots/04-node-zoom-detail.png`
+- **⟲ reset** clears all KG edits + selections and restores the overview (a full reset,
+  not just the camera).
 - In **multi-run** mode the node sizes / edge widths reflect **support-frequency**, and a
-  click in the support list highlights the item here.
+  click in the support list highlights the item on the graph (a bright orange node
+  outline / thick orange edge — distinct from the blue claim-selection accent).
 
 ## Header controls
 - **Slice selector** (top-left): the one books scenario (Chopin) is selected; the gated
@@ -127,7 +130,7 @@ content-withheld a mild rise, knowledge-withheld ≈ 84% (structure withheld hur
 | `screenshots/03-multiselect-brush.png` | Multi-selected claims brushed onto the subgraph with badges + readable edge labels |
 | `screenshots/04-node-zoom-detail.png` | Node tapped → zoom + entity-detail pane |
 | `screenshots/06-generation-settings.png` | ⚙ generation-settings panel open (mock LLM params) |
-| `screenshots/07-repair-loop.png` | Add the date *generation+verification* → date node added, c3 grounded, "+1 repaired: c3" |
+| `screenshots/07-repair-loop.png` | Add the date *generation+verification* → date node added, c3 grounded, repair-leverage +1 (c3), grounded 5/6 → 6/6 |
 | `screenshots/08-edit-scope.png` | Add the date *generation only* → green-dashed (model-only) edge, c3 still fabricated (unverifiable), "+0 repaired" — the scope contrast |
 
 ## Authored design details (where the spec left them open)
