@@ -77,32 +77,26 @@ def test_single_run_summary_no_se():
     assert s.status_counts[ClaimStatus.FABRICATED.value] == 1
 
 
-# --- multi-run (mean +/- SE, support-frequency) ----------------------------
-def test_build_runset_shapes():
+# --- multi-run (FULL only: mean +/- SE, support-frequency) -----------------
+def test_build_runset_is_full_condition_n_runs():
     for n in fx.N_CHOICES:
         runs = fx.build_runset(n)
-        conds = {r.condition for r in runs}
-        assert conds == {
-            Condition.FULL,
-            Condition.KNOWLEDGE_ABSENT,
-            Condition.CONTENT_ABSENT,
-        }
-        for cond in conds:  # n runs per condition
-            assert sum(1 for r in runs if r.condition == cond) == n
+        assert len(runs) == n  # N runs, FULL condition only (no condition selector)
+        assert all(r.condition == Condition.FULL for r in runs)
         assert all(isinstance(r, GroundingRun) for r in runs)
     # claims are NOT aligned across runs: within-run claim_ids only
-    runs = fx.build_condition_runset(5, Condition.FULL)
+    runs = fx.build_runset(5)
     assert runs[0].claims[0].claim_id != runs[1].claims[0].claim_id
 
 
 def test_runset_clamped():
     assert len(fx.build_runset(0)) == len(fx.build_runset(1))  # clamped to >=1
-    assert len({r.condition for r in fx.build_runset(50)}) == 3  # clamped to <=20, still 3 conds
+    assert len(fx.build_runset(50)) == 20  # clamped to <=20
 
 
 def test_multirun_diagnostics_stable_and_well_formed():
-    d1 = fx.mock_answer_diagnostics(20, Condition.FULL)
-    d2 = fx.mock_answer_diagnostics(20, Condition.FULL)
+    d1 = fx.mock_answer_diagnostics(20)
+    d2 = fx.mock_answer_diagnostics(20)
     assert isinstance(d1, AnswerDiagnostics)
     assert d1.model_dump() == d2.model_dump(), "aggregation must be deterministic/stable"
     assert d1.n_runs == 20
@@ -114,19 +108,8 @@ def test_multirun_diagnostics_stable_and_well_formed():
         assert 0.0 <= v.se < 0.2
 
 
-def test_withhold_from_context_shifts_distribution():
-    cd = fx.mock_condition_diagnostics(20)
-    fab = ClaimStatus.FABRICATED.value
-    full = cd[Condition.FULL.value].status_distribution[fab].mean
-    content = cd[Condition.CONTENT_ABSENT.value].status_distribution[fab].mean
-    knowledge = cd[Condition.KNOWLEDGE_ABSENT.value].status_distribution[fab].mean
-    # withholding raises fabrication; knowledge-absence hurts most (structure withheld)
-    assert content > full
-    assert knowledge > content
-
-
 def test_support_frequency_observational_over_kg_items():
-    d = fx.mock_answer_diagnostics(20, Condition.FULL)
+    d = fx.mock_answer_diagnostics(20)
     sf = d.support_frequency
     assert sf, "expected a non-empty support-frequency map"
     assert all(0.0 <= v <= 1.0 for v in sf.values())
@@ -138,15 +121,15 @@ def test_support_frequency_observational_over_kg_items():
 
 
 def test_n_selector_changes_distribution():
-    d5 = fx.mock_answer_diagnostics(5, Condition.FULL)
-    d20 = fx.mock_answer_diagnostics(20, Condition.FULL)
+    d5 = fx.mock_answer_diagnostics(5)
+    d20 = fx.mock_answer_diagnostics(20)
     means5 = {k: v.mean for k, v in d5.status_distribution.items()}
     means20 = {k: v.mean for k, v in d20.status_distribution.items()}
     assert means5 != means20
 
 
 def test_aggregate_direct_runset_matches_helper():
-    runs = fx.build_condition_runset(10, Condition.FULL)
+    runs = fx.build_runset(10)
     assert aggregate_runset(runs).model_dump() == fx.mock_answer_diagnostics(10).model_dump()
 
 
@@ -156,12 +139,12 @@ def test_single_run_summary_matches_helper():
     )
 
 
-# --- scoped KG edits (gen-only vs gen+verification) ------------------------
-def _rm(tid, scope):
+# --- two KG operations: REMOVE (from generation) and ADD (to the KG) -------
+def _rm(tid, scope="gen"):
     return {"op": "remove", "kind": "triplet", "scope": scope, "id": tid}
 
 
-def _add_date(scope):
+def _add_date(scope="both"):
     return {"op": "add", "kind": "triplet", "scope": scope,
             "subject": fx.NCHOPIN, "relation": "date of birth", "value": "15 April 1771"}
 
@@ -169,32 +152,30 @@ def _add_date(scope):
 def test_baseline_and_structure_removal():
     # baseline: 5 grounded (c3 = date is a gap), no edits
     assert fx.grounded_count([]) == 5
-    # remove the father triple (P22) generation+verification -> c1 and c5 fabricate
-    s = fx.statuses_for_graph([_rm("P22", "both")])
+    # REMOVE the father triple (P22) from the generation context -> c1 and c5 fabricate
+    s = fx.statuses_for_graph([_rm("P22")])
     assert s["c1"].value == "fabricated" and s["c5"].value == "fabricated"
     assert s["c2"].value != "fabricated"  # P19 still present
-    # the withheld base triple is listed for re-add; its edge is tagged ver_only on a
-    # generation-only removal (still in the verifier's reference)
-    assert [t["id"] for t in fx.removed_triples([_rm("P22", "gen")])] == ["P22"]
-    edges = [e for e in fx.editable_elements([_rm("P22", "gen")]) if "source" in e["data"]]
+    # the withheld base triple is listed for re-add; its edge is tagged ver_only
+    # (still in the verifier's reference — we never ablate the verifier)
+    assert [t["id"] for t in fx.removed_triples([_rm("P22")])] == ["P22"]
+    edges = [e for e in fx.editable_elements([_rm("P22")]) if "source" in e["data"]]
     p22 = next(e for e in edges if e["data"].get("property_id") == "P22")
     assert p22["data"].get("scope_state") == "ver_only"
 
 
-def test_scope_distinguishes_generation_only_from_verification():
-    # generation-only ADD of the date: model states it, but the verifier cannot
-    # confirm it -> c3 stays fabricated (unverifiable); no repair.
-    gen = fx.statuses_with_reasons([_add_date("gen")])
-    assert gen["c3"][0].value == "fabricated" and "unverifiable" in gen["c3"][1]
-    assert fx.repair_result([_add_date("gen")]).repair_leverage == 0
-    # generation+verification ADD: grading uses the edited reference -> c3 grounds (+1)
-    both = fx.statuses_for_graph([_add_date("both")])
+def test_remove_is_absence_induced_and_add_repairs():
+    # REMOVE (from generation context) -> absence-induced fabrication; verifier keeps
+    # the truth, so it is a genuine fabrication, and it is not a "repair" (leverage 0).
+    sw = fx.statuses_with_reasons([_rm("P19")])
+    assert sw["c2"][0].value == "fabricated" and "absence-induced" in sw["c2"][1]
+    assert fx.repair_result([_rm("P19")]).repair_leverage == 0
+    # ADD the missing date to the KG -> c3 grounds, repair-leverage +1 (c3)
+    both = fx.statuses_for_graph([_add_date()])
     assert both["c3"].value == "retrieved"
-    rr = fx.repair_result([_add_date("both")])
+    rr = fx.repair_result([_add_date()])
     assert isinstance(rr, RepairResult)
     assert rr.repair_leverage == 1 and rr.repaired_claim_ids == ["c3"]
-    # generation-only REMOVE is absence-induced (verifier retains the truth)
-    assert "absence-induced" in fx.statuses_with_reasons([_rm("P19", "gen")])["c2"][1]
 
 
 def test_entity_content_removal_and_add():

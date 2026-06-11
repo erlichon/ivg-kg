@@ -141,9 +141,10 @@ def test_callback_graph_single_writer():
 
 
 # --- mode toggle + multi-run controls --------------------------------------
-def test_analytics_has_mode_and_multirun_controls():
+def test_analytics_has_mode_and_n_selector_no_condition_selector():
     s = str(get_layout())
-    assert "analytics-mode" in s and "n-selector" in s and "withhold-condition" in s
+    assert "analytics-mode" in s and "n-selector" in s
+    assert "withhold-condition" not in s  # condition selector removed (RQ2 is offline)
 
 
 def test_mode_bodies_render():
@@ -151,9 +152,9 @@ def test_mode_bodies_render():
 
     single = str(single_run_body(fx.mock_single_run_summary())).lower()
     assert "no se" in single and "single sample" in single
-    cd = fx.mock_condition_diagnostics(20)
-    multi = str(multi_run_body(cd["full"], cd, "full", 20)).lower()
-    assert "support-frequency" in multi and "se" in multi and "shift" in multi
+    multi = str(multi_run_body(fx.mock_answer_diagnostics(20), 20)).lower()
+    assert "support-frequency" in multi and "se" in multi
+    assert "shift" not in multi and "withheld" not in multi  # no condition-shift panel
 
 
 # --- figure factories return Plotly figures --------------------------------
@@ -214,9 +215,11 @@ def test_graph_editor_panel_and_callbacks():
     from app.panels.repair import get_repair_panel, render_repair_body
 
     panel = str(get_repair_panel())
-    assert "edit-scope" in panel and "entity-apply" in panel  # scope toggle + add-entity
-    # body renders for a scoped edit (remove P22) -> re-add + repair-leverage appear
-    body = str(render_repair_body([{"op": "remove", "kind": "triplet", "scope": "both",
+    # add-triplet + add-entity forms exist; the per-edit scope toggle is gone
+    assert "inject-apply" in panel and "entity-apply" in panel
+    assert "edit-scope" not in panel
+    # body renders for a REMOVE edit (P22 from generation) -> re-add + repair-leverage
+    body = str(render_repair_body([{"op": "remove", "kind": "triplet", "scope": "gen",
                                     "id": "P22"}]))
     assert "re-add" in body and "repair-leverage" in body
     app = make_app()

@@ -362,7 +362,7 @@ def edge_detail_content(edge_data: dict, base_triple_ids: set[str]) -> html.Div:
                                     "fontStyle": "italic", "marginBottom": "6px"}))
     if pid in base_triple_ids:
         rows.append(html.Button(
-            "✕ remove this triple (scope from the toggle below)",
+            "✕ remove this triple from the generation context",
             id={"type": "remove-edge", "triple": pid},
             n_clicks=0,
             style={"background": theme.PANEL_ALT,

@@ -37,12 +37,17 @@ stable KG-item IDs (entities, triplets) are.
   (it is a single sample). → `screenshots/01-overview.png`
 - Per-claim status lives in the Answer panel; select a claim to highlight its
   **support path** on the subgraph ("what this verdict rests on").
+- **Two interactive demos** on the KG-edits strip: **REMOVE** evidence from the
+  generation context → re-run → the affected claim fabricates (qualitative RQ2); **ADD**
+  a missing true fact to the KG → re-run → it flips to grounded (repair). See below.
 
-**MULTI-RUN mode** — re-run the query **N times** (N selectable, **default 20**).
+**MULTI-RUN mode** — re-run the query **N times** (N selectable, **default 20**) under the
+**FULL condition** (no condition selector).
 - **(a) Status distribution = mean ± SE** of the per-run answer-level fraction of claims
-  in each grade. The error bars are the **SE of a proportion** `sqrt(p(1-p)/N)` — *not*
-  the ~0.5 Bernoulli per-draw std. A **prominent small-N caveat** states *"N=20 is a
-  floor; small differences are within noise."* → `screenshots/05-multirun.png`
+  in each grade — the **reproducibility of grounding** on this question. The error bars
+  are the **SE of a proportion** `sqrt(p(1-p)/N)` — *not* the ~0.5 Bernoulli per-draw
+  std. A **prominent small-N caveat** states *"N=20 is a floor; small differences are
+  within noise."* → `screenshots/05-multirun.png`
 - **(b) Support-frequency** — for each KG **node** and each **triplet**, the fraction of
   the N runs in which it was **used** to ground a claim (it lies on the support path of
   ≥1 grounded claim that run). Surfaced as **node-size / edge-weight on the subgraph**
@@ -52,49 +57,41 @@ stable KG-item IDs (entities, triplets) are.
   list (a ● node or ◆ triplet); it is highlighted on the subgraph with an accent
   outline / thick accent edge — the same brush behaviour as selecting claims.
   → `screenshots/05-multirun.png`
-- **Withhold-from-context selector** {full · content-withheld · knowledge-withheld} — see
-  the next section; it shows the **distribution shift**.
 
-## KG editing with per-edit SCOPE (the bottom KG EDITS strip)
-Every edit chooses a **scope** (the toggle), which decides what it touches — this *is*
-the SPEC §4.4 two-layer distinction, made interactive:
+There is **no condition selector** in multi-run: it shows only the FULL-condition
+distribution (the reproducibility of grounding on this question). The
+content-vs-knowledge RQ2 contrast is an **offline aggregate** over the question bank
+(SPEC §8), not an interactive per-question toggle.
 
-- **generation only** — change the model's **generation context** only; grading still
-  uses the **FULL** reference (withhold-from-context, RQ2). Removing induces
-  absence-hallucination the verifier can still **catch**; adding lets the model state a
-  fact the verifier **cannot confirm**, so it does **not** repair the verdict.
-- **generation + verification** — change the **real KG**, so grading uses the **edited**
-  reference (edit-the-KG). Adding the missing date grounds c3 (gap-repair); removing
-  **blinds** the verifier.
+## KG editing — two operations (the bottom KG EDITS strip)
+The perturbation surface is exactly **two operations**; there is **no scope toggle** and
+**no generation-only add**. Scope is fixed by the operation:
 
-**The contrast in one move (the date gap):** the date claim (c3) is fabricated because the
-KG holds no usable birth-date fact (a genuine gap). Add the pre-filled date (✚ add triplet):
-- *generation+verification* → c3 flips to **retrieved**; **repair-leverage +1: c3**. → `screenshots/07-repair-loop.png`
-- *generation only* → the date appears as a **green-dashed** (model-only, unverified) edge,
-  but c3 stays **fabricated** ("unverifiable — the verifier's reference still lacks it") and
-  **repair-leverage +0**. → `screenshots/08-edit-scope.png`
+- **REMOVE** (a triplet or an entity's description) → withholds it from the model's
+  **generation context** only. The verifier / grading reference is **always full and is
+  never ablated**, so the claim fabricates only if the model actually couldn't recover it
+  — the qualitative **RQ2** demo ("does the model NEED this evidence?"). The removed edge
+  shows **dashed + dimmed** ("withheld from the model, still in the verifier's reference").
+- **ADD** (a true missing fact: a triplet or an entity) → adds it to the **KG** (both the
+  generation context and the grading reference). This **repairs**.
 
-**Edit operations (all scoped):**
-- **Add / remove a triplet.** Remove by tapping its **edge** (scope from the toggle); a
-  generation-only removal leaves the edge **dashed + dimmed** ("withheld from the model,
-  still in the verifier's reference"). Withheld base triples come back via **"+ re-add"**.
-- **Add an entity** (label + **optional description**) → a new node.
-- **Remove an entity's content** (description/image) from its **detail pane** (tap the
-  node): clears only the node's content — the node and its triplets stay. Scoped too
-  (generation-only = withheld from the model; generation+verification = removed from the KG).
-- **Edits log + undo:** every edit is listed with its scope and a **✕** to undo it.
-- **Repair-leverage** = the COUNT of claims that flip FABRICATED → grounded vs the original
-  answer; the "grounded N/6 now" absolute is kept alongside.
+**The two single-run demos (on this one answer):**
+- **(a) REMOVE demo (RQ2):** tap a triplet's edge → **✕ remove from the generation
+  context** (or remove an entity's description in its detail pane) → the affected claim
+  **fabricates** (e.g. remove `father (P22)` → c1 and the France-via-father path flip to
+  Fabricated). Withheld base triples come back via **"+ re-add"**.
+- **(b) ADD demo (RQ3 / gap-repair):** the date claim (c3) is fabricated because the KG
+  has **no usable birth-date fact** (a genuine gap). Add the pre-filled date (**✚ add
+  triplet**) → c3 flips to **retrieved** and **repair-leverage +1 (c3)**, grounded 5/6 → 6/6.
+  → `screenshots/07-repair-loop.png`
 
-> The graph encodes scope: solid = in both; **dashed-dim** = withheld from the model
-> (still verifiable); **green-dashed** = model-only (unverifiable). Captions on the strip
-> state: generation-only never changes the reference; generation+verification does.
+Also: **add an entity** (label + optional description → a new node); the **edits log**
+lists each op (e.g. "remove ... [from generation context]", "add ... [to KG]") with a **✕**
+to undo it.
 
-## Withhold-from-context shift (Analytics, multi-run)
-The multi-run **withhold** selector {full · content-withheld · knowledge-withheld} shows
-the per-condition fabrication rate — the distribution **shift** without relabelling true
-claims (grading stays against the full reference). In the mock: full ≈ 26% fabricated,
-content-withheld a mild rise, knowledge-withheld ≈ 84% (structure withheld hurts most).
+> The graph encodes the edit: solid = present; **dashed-dim** = withheld from the model
+> (a REMOVE — still in the verifier's reference, never ablated). REMOVE never changes the
+> reference; ADD does.
 
 ## Subgraph interactions (shared by both modes)
 - **Multi-select → brush.** Click claim rows (or coloured answer spans). Each gets a
@@ -103,8 +100,8 @@ content-withheld a mild rise, knowledge-withheld ≈ 84% (structure withheld hur
 - **1st-degree neighbourhood under a node cap** (`config.SUBGRAPH_NODE_CAP` = 40); the
   Chopin graph is small, so all nodes show.
 - **Tap a node → zoom + entity-detail** (bottom-middle): static placeholder image +
-  label/description, and a **✕ remove this entity's content** button (scoped).
-  → `screenshots/04-node-zoom-detail.png`
+  label/description, and a **✕ remove this entity's content** button (withholds the
+  description from the generation context). → `screenshots/04-node-zoom-detail.png`
 - **⟲ reset** clears all KG edits + selections and restores the overview (a full reset,
   not just the camera).
 - In **multi-run** mode the node sizes / edge widths reflect **support-frequency**, and a
@@ -125,33 +122,33 @@ content-withheld a mild rise, knowledge-withheld ≈ 84% (structure withheld hur
 ## Screenshots
 | file | shows |
 | --- | --- |
-| `screenshots/01-overview.png` | Single-run mode: status %/counts (no SE), the scoped KG-edits strip below |
-| `screenshots/05-multirun.png` | Multi-run: mean±SE distribution + small-N caveat + withhold shift + clickable support-frequency list; a selected triplet/node highlighted on the subgraph (which is sized by support-frequency) |
+| `screenshots/01-overview.png` | Single-run mode: status %/counts (no SE), the KG-edits strip below |
+| `screenshots/05-multirun.png` | Multi-run: FULL-condition mean±SE distribution + small-N caveat + clickable support-frequency list; a selected triplet/node highlighted on the subgraph (which is sized by support-frequency). No condition selector. |
 | `screenshots/03-multiselect-brush.png` | Multi-selected claims brushed onto the subgraph with badges + readable edge labels |
 | `screenshots/04-node-zoom-detail.png` | Node tapped → zoom + entity-detail pane |
 | `screenshots/06-generation-settings.png` | ⚙ generation-settings panel open (mock LLM params) |
-| `screenshots/07-repair-loop.png` | Add the date *generation+verification* → date node added, c3 grounded, repair-leverage +1 (c3), grounded 5/6 → 6/6 |
-| `screenshots/08-edit-scope.png` | Add the date *generation only* → green-dashed (model-only) edge, c3 still fabricated (unverifiable), "+0 repaired" — the scope contrast |
+| `screenshots/07-repair-loop.png` | ADD the date to the KG → date node added, c3 grounded, repair-leverage +1 (c3), grounded 5/6 → 6/6 |
 
 ## Authored design details (where the spec left them open)
 - **Node cap:** `SUBGRAPH_NODE_CAP = 40` (`src/ivg_kg/config.py`).
 - **Status palette (hex):** Retrieved `#8fd9a8`, Supportable `#f2d08a`, Fabricated
-  `#f4a6c0`; selection-outline accent `#58a6ff` (`app/theme.py`).
+  `#f4a6c0`; claim selection-outline accent `#58a6ff`; KG-item selection `#ff9d4d`
+  (`app/theme.py`).
 - **Spurious-path reason (c5):** *"relation/value illegitimacy: the path reaches France
   via the father's place of birth (P22→P19→P17), not the subject's own birthplace (P19) —
   Chopin was born in Żelazowa Wola, Poland."*
-- **N choices:** {5, 10, 20}, default 20. Per-condition, per-fact run outcomes
+- **N choices:** {5, 10, 20}, default 20. FULL-condition per-fact run outcomes
   (`_OUTCOME_COUNTS` in `fixtures.py`: ok / fab / absent counts over 20 runs) drive the
-  multi-run distribution and its shift; grounded claims carry support paths so
-  support-frequency aggregates over stable KG-item IDs (`diagnostics.aggregate_runset`).
+  multi-run distribution; grounded claims carry support paths so support-frequency
+  aggregates over stable KG-item IDs (`diagnostics.aggregate_runset`). The
+  content-vs-knowledge RQ2 contrast is computed offline over the bank (SPEC §8), not here.
 - **Support-frequency** is observational: node size scales 40→96 px and edge width
   1.5→8.5 with the fraction of runs the item grounded a claim (`app/panels/subgraph.py`).
-- **Scoped edits / grading:** a claim grounds iff its evidence is in BOTH the generation
+- **Two operations / grading:** a claim grounds iff its evidence is in BOTH the generation
   context AND the verification reference (`fixtures.apply_edits` / `statuses_with_reasons`).
-  generation-only edits change only the generation view; generation+verification change
-  both. The date is a GAP (absent from the base KG); only a generation+verification add
-  repairs c3. **Repair-leverage** is measured vs the original answer, so the gap-repair
-  reports **+1 repaired: c3** (and the generation-only add reports +0 — unverifiable).
-- **Graph scope styling:** dashed-dim edge = withheld from the model (still in the
-  reference); green-dashed edge = model-only (unverifiable); dashed node border = added
-  entity / content-removed entity (`app/panels/subgraph.py` BASE_STYLESHEET).
+  REMOVE withholds from the generation context only (the reference is never ablated);
+  ADD adds to the KG (both). The date is a GAP (absent from the base KG); ADDing it repairs
+  c3, so **repair-leverage = +1 (c3)** vs the original answer.
+- **Graph styling:** a REMOVE leaves the edge dashed + dimmed (withheld from the model,
+  still in the reference); a dashed node border = added entity / content-removed entity
+  (`app/panels/subgraph.py` BASE_STYLESHEET).

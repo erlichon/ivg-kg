@@ -42,14 +42,12 @@ from ivg_kg.mock.fixtures import (
     SUGGESTED_INJECT,
     editable_elements,
     mock_answer_diagnostics,
-    mock_condition_diagnostics,
     mock_single_run_summary,
     statuses_for_graph,
 )
-from ivg_kg.schema import Condition, GroundingRun
+from ivg_kg.schema import GroundingRun
 
 _LAYOUT = {"name": "cose", "animate": False, "fit": True, "padding": 24}
-_VALID_CONDITIONS = {c.value for c in Condition}
 
 
 def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) -> None:
@@ -57,9 +55,6 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
     claims_by_id = {c.claim_id: c for c in run.claims}
     node_labels = node_labels_from_elements(elements)
     base_triple_ids = set(ALL_TRIPLE_IDS)
-
-    def _condition(value: str | None) -> Condition:
-        return Condition(value) if value in _VALID_CONDITIONS else Condition.FULL
 
     # ---- A: claim click -> selected-claims (toggle; sole writer) ------------
     @app.callback(
@@ -117,18 +112,17 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
         override = statuses_for_graph(edits)
         return render_claim_list(run, selected or [], grades or [], status_override=override)
 
-    # ---- C: selected/mode/N/condition/kg-selection -> subgraph stylesheet ----
+    # ---- C: selected/mode/N/kg-selection -> subgraph stylesheet -------------
     @app.callback(
         Output("subgraph", "stylesheet"),
         Input("selected-claims", "data"),
         Input("analytics-mode", "value"),
         Input("n-selector", "value"),
-        Input("withhold-condition", "value"),
         Input("selected-kg-items", "data"),
     )
-    def style_subgraph(selected, mode, n, condition, kg_selected):  # noqa: ANN001
+    def style_subgraph(selected, mode, n, kg_selected):  # noqa: ANN001
         if mode == "multi":
-            diag = mock_answer_diagnostics(int(n or 20), _condition(condition))
+            diag = mock_answer_diagnostics(int(n or 20))
             sized = support_frequency_stylesheet(BASE_STYLESHEET, diag.support_frequency)
             return kg_item_highlight_stylesheet(sized, kg_selected or [])
         selected = selected or []
@@ -137,20 +131,16 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
         ordered = [claims_by_id[cid] for cid in selected if cid in claims_by_id]
         return highlight_stylesheet(BASE_STYLESHEET, ordered, node_labels)
 
-    # ---- E: mode + N + condition -> analytics body --------------------------
+    # ---- E: mode + N -> analytics body --------------------------------------
     @app.callback(
         Output("analytics-body", "children"),
         Input("analytics-mode", "value"),
         Input("n-selector", "value"),
-        Input("withhold-condition", "value"),
     )
-    def render_analytics_body(mode, n, condition):  # noqa: ANN001
+    def render_analytics_body(mode, n):  # noqa: ANN001
         if mode == "multi":
             n = int(n or 20)
-            cond = _condition(condition)
-            condition_diags = mock_condition_diagnostics(n)
-            diag = condition_diags[cond.value]
-            return multi_run_body(diag, condition_diags, cond.value, n)
+            return multi_run_body(mock_answer_diagnostics(n), n)
         return single_run_body(mock_single_run_summary())
 
     # ---- F: mode -> show the multi-run controls only in multi-run mode ------
@@ -206,7 +196,9 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
         style["display"] = "block" if (n or 0) % 2 == 1 else "none"
         return style
 
-    # ---- EDIT: scoped add/remove/content/undo -> kg-edits (sole writer) -----
+    # ---- EDIT: two operations -> kg-edits (sole writer) ---------------------
+    # Scope is fixed by the operation (no toggle): REMOVE -> "gen" (generation
+    # context only; reference never ablated); ADD -> "both" (to the KG).
     @app.callback(
         Output("kg-edits", "data"),
         Input({"type": "remove-edge", "triple": ALL}, "n_clicks"),
@@ -216,7 +208,6 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
         Input({"type": "remove-content", "entity": ALL}, "n_clicks"),
         Input({"type": "remove-edit", "idx": ALL}, "n_clicks"),
         Input("reset-view", "n_clicks"),
-        State("edit-scope", "value"),
         State("inject-subject", "value"),
         State("inject-relation", "value"),
         State("inject-value", "value"),
@@ -226,36 +217,34 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
         prevent_initial_call=True,
     )
     def apply_edit(  # noqa: ANN001, PLR0913
-        _rm, _add, _inj, _ent, _rc, _re, _reset, scope, subject, relation, value, label, desc,
-        current,
+        _rm, _add, _inj, _ent, _rc, _re, _reset, subject, relation, value, label, desc, current,
     ):
         trig = dash.ctx.triggered_id
         if not dash.ctx.triggered or not dash.ctx.triggered[0].get("value"):
             raise PreventUpdate
         if trig == "reset-view":
             return []  # reset clears all KG edits
-        scope = scope if scope in ("gen", "both") else "both"
         edits = list(current or [])
-        if trig == "inject-apply":
+        if trig == "inject-apply":  # ADD a triplet -> to the KG (both)
             if not (relation and value):
                 raise PreventUpdate
-            edits.append({"op": "add", "kind": "triplet", "scope": scope,
+            edits.append({"op": "add", "kind": "triplet", "scope": "both",
                           "subject": subject, "relation": relation, "value": value})
-        elif trig == "entity-apply":
+        elif trig == "entity-apply":  # ADD an entity -> to the KG (both)
             if not label:
                 raise PreventUpdate
-            edits.append({"op": "add", "kind": "entity", "scope": scope,
+            edits.append({"op": "add", "kind": "entity", "scope": "both",
                           "id": f"new:{label}", "label": label, "description": desc or None})
         elif isinstance(trig, dict):
             kind = trig.get("type")
-            if kind == "remove-edge":
-                edits.append({"op": "remove", "kind": "triplet", "scope": scope,
+            if kind == "remove-edge":  # REMOVE a triplet -> from generation context (gen)
+                edits.append({"op": "remove", "kind": "triplet", "scope": "gen",
                               "id": trig.get("triple")})
-            elif kind == "readd":
-                edits.append({"op": "add", "kind": "triplet", "scope": scope,
+            elif kind == "readd":  # restore a withheld triplet to generation
+                edits.append({"op": "add", "kind": "triplet", "scope": "gen",
                               "id": trig.get("item")})
-            elif kind == "remove-content":
-                edits.append({"op": "remove", "kind": "content", "scope": scope,
+            elif kind == "remove-content":  # REMOVE a description -> from generation context (gen)
+                edits.append({"op": "remove", "kind": "content", "scope": "gen",
                               "id": trig.get("entity")})
             elif kind == "remove-edit":
                 i = trig.get("idx")

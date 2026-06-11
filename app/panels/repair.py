@@ -1,14 +1,15 @@
-"""KG editing layer with per-edit scope (SPEC-text §4.4 / §4.6 / RQ3 + CogMG).
+"""KG editing layer — two operations (SPEC-text §4.4 / §4.6 / RQ3 + CogMG).
 
-Every edit carries a SCOPE chosen by the toggle:
-  - generation only        -> change the model's context; grade vs the FULL reference.
-  - generation + verification -> change the real KG; grade vs the EDITED reference.
+There is no scope toggle. Scope is fixed by the operation:
+  - REMOVE (a triplet or an entity's description) -> from the GENERATION CONTEXT only;
+    the verifier / grading reference is ALWAYS full and is NEVER ablated. REMOVE tests
+    whether the model NEEDS that evidence (qualitative RQ2).
+  - ADD (a true missing fact: a triplet or an entity) -> to the KG (both the generation
+    context and the grading reference). ADD repairs / gap-repairs.
 
-You can add/remove triplets, add an entity (with an optional description), and
-remove an entity's content (description/image, via the entity-detail pane). The
-edits log shows each op + its scope with an undo; the readout shows repair-leverage
-(claims flipped FABRICATED -> grounded) and the current grounded count. Scripted,
-deterministic, offline.
+The edits log shows each op + what it touched with an undo; the readout shows
+repair-leverage (claims flipped FABRICATED -> grounded) and the grounded count.
+Scripted, deterministic, offline.
 """
 from __future__ import annotations
 
@@ -25,36 +26,25 @@ from ivg_kg.mock.fixtures import (
 )
 
 _INFO_REPAIR = (
-    "KG editing with per-edit SCOPE (SPEC-text §4.4).\n"
-    "Each edit applies to either:\n"
-    "- generation only: changes ONLY the model's generation context; grading still "
-    "uses the FULL reference. Removing induces absence-hallucination the verifier "
-    "still CATCHES; adding lets the model state a fact the verifier still cannot "
-    "confirm (so it does NOT repair the verdict).\n"
-    "- generation + verification: changes the real KG, so grading uses the EDITED "
-    "reference. Adding the missing date grounds c3 (gap-repair); removing blinds the "
-    "verifier.\n\n"
-    "Add/remove triplets here; add an entity (optional description); remove an "
-    "entity's content from its detail pane (tap a node). Scripted visual mock."
-)
-_SCOPE_INFO = (
-    "Scope of the next edit. 'generation only' = withhold-from-context (the grading "
-    "reference stays full). 'generation + verification' = edit-the-KG (grading uses "
-    "the edited reference). Watch the repair-leverage differ: adding the date "
-    "generation-only does NOT repair c3 (still unverifiable); generation+verification "
-    "does."
+    "KG editing — two operations (SPEC-text §4.4). Scope is fixed by the operation; "
+    "there is no toggle.\n"
+    "- REMOVE a triplet (tap its edge) or an entity's description (its detail pane) "
+    "-> withholds it from the model's GENERATION CONTEXT only. The grading reference "
+    "stays FULL (never ablated), so the claim fabricates only if the model actually "
+    "couldn't recover it -- the qualitative RQ2 demo (does the model NEED it?).\n"
+    "- ADD a triplet or an entity (optional description) -> adds it to the KG (both "
+    "the generation context and the grading reference). This repairs: a claim "
+    "fabricated only because the KG lacked a true fact flips to grounded.\n"
+    "We never remove from the verifier; there is no generation-only add. Scripted mock."
 )
 _INFO_LEVERAGE = (
     "Repair-leverage (RQ3).\n"
     "WHAT: the COUNT of the answer's claims whose verdict flips FABRICATED -> grounded.\n"
-    "WHEN: after you restore missing evidence to the KG with "
-    "'generation + verification' scope and the answer is RE-RUN. A 'generation only' "
-    "edit does NOT count -- the verifier still cannot confirm it (the claim stays "
-    "unverifiable).\n"
+    "WHEN: after you ADD a true missing fact to the KG and the answer is RE-RUN.\n"
     "HOW: compared to the ORIGINAL answer (no edits), aligned by claim_id within this "
     "one before/after pair; regeneration-based (not a deterministic re-grounding).\n"
     "Here the only originally-fabricated claim is the father's birth date (c3) -- the "
-    "KG has a gap -- so restoring the date (gen+verification) repairs +1 (c3)."
+    "KG has a gap -- so adding the date repairs +1 (c3)."
 )
 
 
@@ -62,25 +52,6 @@ def _btn(color: str) -> dict:
     return {"background": theme.PANEL, "color": color, "border": f"1px solid {color}",
             "borderRadius": "4px", "padding": "3px 10px", "cursor": "pointer",
             "fontFamily": theme.MONO, "fontSize": "0.74em", "flexShrink": "0"}
-
-
-def _scope_toggle() -> html.Div:
-    return html.Div(
-        [
-            html.Span("edit scope ", style={"color": theme.TEXT, "fontSize": "0.78em"}),
-            dcc.RadioItems(
-                id="edit-scope",
-                options=[{"label": f" {SCOPE_LABELS['gen']} ", "value": "gen"},
-                         {"label": f" {SCOPE_LABELS['both']} ", "value": "both"}],
-                value="both", inline=True,
-                labelStyle={"color": theme.TEXT, "marginRight": "14px", "cursor": "pointer"},
-                inputStyle={"marginRight": "4px"},
-                style={"display": "inline-block"},
-            ),
-            theme.info_icon(_SCOPE_INFO),
-        ],
-        style={"marginBottom": "8px"},
-    )
 
 
 def _add_triplet_form() -> html.Div:
@@ -216,20 +187,20 @@ def get_repair_panel() -> html.Div:
     return html.Div(
         [
             html.Div(
-                [html.Span("KG EDITS (scoped)",
+                [html.Span("KG EDITS",
                            style={"color": theme.MUTED, "fontSize": "0.75em",
                                   "letterSpacing": "0.1em"}),
                  theme.info_icon(_INFO_REPAIR)],
                 style={"marginBottom": "4px"},
             ),
             html.Div(
-                "Choose the scope per edit: generation-only (withhold-from-context; "
-                "the grading reference stays full) vs generation+verification "
-                "(edit-the-KG; grading uses the edited reference).",
+                "Two operations: REMOVE (tap a triplet's edge, or remove an entity's "
+                "description in its detail pane) withholds it from the model's "
+                "generation context (the verifier keeps the full reference); ADD (below) "
+                "adds a true fact to the KG and repairs.",
                 style={"color": theme.FAINT, "fontSize": "0.7em", "fontStyle": "italic",
                        "marginBottom": "10px", "lineHeight": "1.4"},
             ),
-            _scope_toggle(),
             _add_triplet_form(),
             _add_entity_form(),
             html.Div(render_repair_body(None), id="repair-body"),

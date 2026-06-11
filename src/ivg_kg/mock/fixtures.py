@@ -298,14 +298,13 @@ def mock_single_run_summary() -> SingleRunStatusSummary:
 
 
 # ---------------------------------------------------------------------------
-# Multi-run model (#5): N runs per condition. Claims are NOT aligned across runs;
-# each run independently samples, per fact, whether the generator states it
-# correctly ("ok" -> its grounded status + support path), states a WRONG value
-# ("fab" -> FABRICATED, no support), or omits it ("absent"). Withholding evidence
-# from the GENERATION context (content- / knowledge-absent) shifts the per-run
-# status distribution toward fabrication WITHOUT relabelling true claims — grading
-# is always against the FULL reference. This is the withhold-from-context layer
-# (§4.4(a)); its result is the distribution SHIFT across conditions.
+# Multi-run model (#5): N runs under the FULL condition (no condition selector).
+# Claims are NOT aligned across runs; each run independently samples, per fact,
+# whether the generator states it correctly ("ok" -> its grounded status + support
+# path), states a WRONG value ("fab" -> FABRICATED, no support), or omits it
+# ("absent"). This measures the REPRODUCIBILITY of grounding on this question.
+# The content-vs-knowledge contrast (RQ2) is the OFFLINE sweep's job (SPEC §4.8/§8),
+# NOT an interactive per-question toggle, so the mock keeps only FULL here.
 # ---------------------------------------------------------------------------
 _OK, _FAB, _ABS = "ok", "fab", "absent"
 _OUTCOME_ORDER = [_OK, _FAB, _ABS]
@@ -320,46 +319,16 @@ _FAB_TEXT: dict[str, str] = {
     "c6": "Chopin is known for his symphonies",
 }
 
-# fact id -> condition -> {ok|fab|absent: count} (each sums to _MAX_DRAWS). FULL is
-# mostly grounded (c3 is the standing date fabrication); knowledge-absent collapses
-# the structural / path facts into fabrication or omission; content-absent shifts
-# only mildly (structure survives content withholding).
-_OUTCOME_COUNTS: dict[str, dict[str, dict[str, int]]] = {
-    "c1": {
-        Condition.FULL.value: {_OK: 18, _FAB: 1, _ABS: 1},
-        Condition.CONTENT_ABSENT.value: {_OK: 15, _FAB: 3, _ABS: 2},
-        Condition.KNOWLEDGE_ABSENT.value: {_OK: 4, _FAB: 12, _ABS: 4},
-    },
-    "c2": {
-        Condition.FULL.value: {_OK: 18, _FAB: 1, _ABS: 1},
-        Condition.CONTENT_ABSENT.value: {_OK: 13, _FAB: 5, _ABS: 2},
-        Condition.KNOWLEDGE_ABSENT.value: {_OK: 5, _FAB: 11, _ABS: 4},
-    },
-    "c3": {  # the date: fabricated under every condition (the KG lacks a usable date)
-        Condition.FULL.value: {_FAB: 16, _ABS: 4},
-        Condition.CONTENT_ABSENT.value: {_FAB: 16, _ABS: 4},
-        Condition.KNOWLEDGE_ABSENT.value: {_FAB: 18, _ABS: 2},
-    },
-    "c4": {
-        Condition.FULL.value: {_OK: 16, _ABS: 4},
-        Condition.CONTENT_ABSENT.value: {_OK: 11, _FAB: 5, _ABS: 4},
-        Condition.KNOWLEDGE_ABSENT.value: {_OK: 4, _FAB: 8, _ABS: 8},
-    },
-    "c5": {  # spurious-supportable France
-        Condition.FULL.value: {_OK: 12, _FAB: 8},
-        Condition.CONTENT_ABSENT.value: {_OK: 8, _FAB: 12},
-        Condition.KNOWLEDGE_ABSENT.value: {_OK: 2, _FAB: 14, _ABS: 4},
-    },
-    "c6": {
-        Condition.FULL.value: {_OK: 18, _FAB: 1, _ABS: 1},
-        Condition.CONTENT_ABSENT.value: {_OK: 15, _FAB: 3, _ABS: 2},
-        Condition.KNOWLEDGE_ABSENT.value: {_OK: 3, _FAB: 11, _ABS: 6},
-    },
+# fact id -> {ok|fab|absent: count} over the N FULL runs (each sums to _MAX_DRAWS).
+# Mostly grounded; c3 is the standing date fabrication (the KG lacks a usable date).
+_OUTCOME_COUNTS: dict[str, dict[str, int]] = {
+    "c1": {_OK: 18, _FAB: 1, _ABS: 1},
+    "c2": {_OK: 18, _FAB: 1, _ABS: 1},
+    "c3": {_FAB: 16, _ABS: 4},  # the date: fabricated (gap)
+    "c4": {_OK: 16, _ABS: 4},
+    "c5": {_OK: 12, _FAB: 8},  # spurious-supportable France
+    "c6": {_OK: 18, _FAB: 1, _ABS: 1},
 }
-
-_WITHHOLD_CONDITIONS = [
-    Condition.FULL, Condition.CONTENT_ABSENT, Condition.KNOWLEDGE_ABSENT,
-]
 
 
 def _spread(counts: dict[str, int], order: list[str]) -> list[str]:
@@ -382,14 +351,11 @@ def _spread(counts: dict[str, int], order: list[str]) -> list[str]:
     return seq
 
 
-def build_condition_runset(n: int, condition: Condition) -> list[GroundingRun]:
-    """The N runs for one condition (claims NOT aligned across runs; §4.8)."""
+def build_runset(n: int = _MAX_DRAWS) -> list[GroundingRun]:
+    """The N FULL-condition runs (claims NOT aligned across runs; §4.8)."""
     n = max(1, min(n, _MAX_DRAWS))
     templates = {c.claim_id: c for c in canonical_claims()}
-    outcome_seqs = {
-        cid: _spread(_OUTCOME_COUNTS[cid][condition.value], _OUTCOME_ORDER)
-        for cid in _OUTCOME_COUNTS
-    }
+    outcome_seqs = {cid: _spread(_OUTCOME_COUNTS[cid], _OUTCOME_ORDER) for cid in _OUTCOME_COUNTS}
     runs: list[GroundingRun] = []
     for j in range(n):
         claims: list[ClaimRecord] = []
@@ -411,54 +377,39 @@ def build_condition_runset(n: int, condition: Condition) -> list[GroundingRun]:
                 )
         runs.append(
             GroundingRun(
-                run_id=f"chopin-{condition.value}-{j}", question=QUESTION,
+                run_id=f"chopin-full-{j}", question=QUESTION,
                 answer_text=ANSWER_TEXT, slice="books", phase="A",
-                condition=condition, sample_index=j, claims=claims,
+                condition=Condition.FULL, sample_index=j, claims=claims,
                 grading_reference_id="chopin-mock-v1", error_rates=dict(ERROR_RATES),
             )
         )
     return runs
 
 
-def build_runset(n: int = _MAX_DRAWS) -> list[GroundingRun]:
-    """All N runs under each withhold-from-context condition, concatenated."""
-    runs: list[GroundingRun] = []
-    for cond in _WITHHOLD_CONDITIONS:
-        runs.extend(build_condition_runset(n, cond))
-    return runs
-
-
-def mock_answer_diagnostics(
-    n: int = _MAX_DRAWS, condition: Condition = Condition.FULL
-) -> AnswerDiagnostics:
-    """Multi-run diagnostics for one condition's N runs (default FULL; §4.8)."""
-    return aggregate_runset(build_condition_runset(n, condition))
-
-
-def mock_condition_diagnostics(n: int = _MAX_DRAWS) -> dict[str, AnswerDiagnostics]:
-    """Per-condition multi-run diagnostics — the withhold-from-context shift (#5)."""
-    return {
-        cond.value: aggregate_runset(build_condition_runset(n, cond))
-        for cond in _WITHHOLD_CONDITIONS
-    }
+def mock_answer_diagnostics(n: int = _MAX_DRAWS) -> AnswerDiagnostics:
+    """Multi-run diagnostics over the N FULL runs (no condition selector; §4.8)."""
+    return aggregate_runset(build_runset(n))
 
 
 # ---------------------------------------------------------------------------
-# Editing layer with PER-EDIT SCOPE (mock; SPEC-text §4.4 / §4.6)
+# Editing layer — TWO operations only (mock; SPEC-text §4.4 / §4.6)
 # ---------------------------------------------------------------------------
-# Every edit carries a SCOPE that decides what it touches:
-#   - "gen"  (generation only): change ONLY the model's generation context; the
-#            grading reference stays FULL. Withhold-from-context (RQ2): removing
-#            induces absence-hallucination the verifier can still CATCH; ADDING a
-#            fact lets the model state it but the verifier still cannot confirm it.
-#   - "both" (generation + verification): change the real KG, so grading uses the
-#            EDITED reference. Edit-the-KG (gap-repair): adding the missing date
-#            grounds c3; removing blinds the verifier.
-# A claim grounds iff its evidence is present in BOTH the generation context AND
-# the verification reference; otherwise it is fabricated, with a reason naming the
-# missing side. Edits are a single list of records, each:
+# There is NO per-edit scope toggle and NO generation-only add. Scope is fixed by
+# the operation:
+#   - REMOVE a triplet or a description -> from the GENERATION CONTEXT only ("gen").
+#     The verifier / grading reference is ALWAYS full and is NEVER ablated. REMOVE
+#     tests whether the model NEEDS that evidence (qualitative RQ2): the claim
+#     fabricates because the model lost it, while the grader still holds the truth.
+#   - ADD a true missing fact -> to the KG ("both": generation context AND grading
+#     reference). ADD repairs / gap-repairs: a claim fabricated only because the KG
+#     lacks a true triplet flips to grounded -> the repair_leverage count.
+# A claim grounds iff its evidence is present in BOTH the generation context AND the
+# verification reference. Since we never remove from the reference and never add to
+# generation-only, the reference is always a superset of the generation context.
+# Edits are a single list of records, each:
 #   {"op": "add"|"remove", "kind": "triplet"|"entity"|"content", "scope": "gen"|"both",
 #    "id":..., "label":..., "description":..., "subject":..., "relation":..., "value":...}
+# (scope is set by op: remove -> "gen", add -> "both" — not chosen by the user.)
 # The father's birth DATE is a GAP -- absent from the base KG (the gap-repair target).
 # Deterministic, offline.
 
@@ -485,7 +436,7 @@ ENTITY_OPTIONS: list[dict] = [
     {"label": _NODE_LABELS[q], "value": q} for q in (FCHOPIN, NCHOPIN, MARAIN, FRANCE, NOCT)
 ]
 SCOPE_LABELS: dict[str, str] = {
-    "gen": "generation only", "both": "generation + verification",
+    "gen": "from generation context", "both": "to KG",
 }
 
 # claim -> evidence it needs to ground (a date-of-birth fact for c3; structure else).
@@ -551,20 +502,22 @@ def apply_edits(edits: list[dict] | None) -> dict:
 def _status_and_reason(
     deps: frozenset[str], gen: set[str], ver: set[str], grounded: ClaimStatus
 ) -> tuple[ClaimStatus, str]:
+    # The grading reference is never ablated, so it is always a superset of the
+    # generation context: the only cases are grounded, absence-induced (evidence
+    # withheld from the model only), or simply unsupported (the KG gap).
     in_gen, in_ver = deps <= gen, deps <= ver
     if in_gen and in_ver:
         return grounded, "grounded"
     if in_ver and not in_gen:
         return ClaimStatus.FABRICATED, (
-            "absence-induced: evidence withheld from the model, but the verifier "
-            "still holds it (a wrong claim would be caught)"
+            "absence-induced: the evidence was REMOVED from the model's generation "
+            "context, but the verifier still holds the full reference (a wrong "
+            "claim would be caught). REMOVE tests whether the model needs it."
         )
-    if in_gen and not in_ver:
-        return ClaimStatus.FABRICATED, (
-            "unverifiable: the model states it, but the verifier's reference no "
-            "longer holds it (the verifier is blinded)"
-        )
-    return ClaimStatus.FABRICATED, "fabricated: evidence absent from generation and verification"
+    return ClaimStatus.FABRICATED, (
+        "fabricated: the KG has no supporting fact for this claim (a gap) — ADD it "
+        "to repair"
+    )
 
 
 def statuses_with_reasons(edits: list[dict] | None = None) -> dict[str, tuple[ClaimStatus, str]]:
