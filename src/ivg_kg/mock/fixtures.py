@@ -658,5 +658,43 @@ def editable_elements(edits: list[dict] | None = None) -> list[dict]:
     return els
 
 
+def _added_date_value(edits: list[dict] | None) -> str | None:
+    """The value of the date-of-birth fact added to the KG (None if not added)."""
+    value = None
+    for e in apply_edits(edits)["added_triples"]:
+        if e.get("key") == DOB_KEY:
+            value = e.get("value")
+    return value
+
+
+def effective_claims(edits: list[dict] | None = None) -> list[ClaimRecord]:
+    """The displayed claims re-graded under the current edits, for the subgraph brush.
+
+    Each claim's status is taken from `statuses_for_graph` (so the brush hue matches
+    the re-verified verdict), and the date claim (c3) gains its SUPPORT PATH — the
+    added date-of-birth triple Nicolas Chopin -[date of birth]-> <literal value> —
+    once the date has been ADDed to the KG (so clicking the now-grounded c3 highlights
+    the whole triple, not just the head node).
+    """
+    statuses = statuses_for_graph(edits)
+    date_value = _added_date_value(edits)
+    out: list[ClaimRecord] = []
+    for c in canonical_claims():
+        update: dict = {"status": statuses.get(c.claim_id, c.status)}
+        if c.claim_id == "c3" and statuses.get("c3") == ClaimStatus.RETRIEVED and date_value:
+            lit_id = f"lit:string:{date_value}"
+            update["support_source"] = SupportSource.DIRECT_TRIPLE
+            update["grounding_path"] = GroundingPath(
+                edges=[PathEdge(
+                    subject_id=NCHOPIN, subject_label=_NODE_LABELS[NCHOPIN],
+                    property_id=DOB_KEY, property_label="date of birth",
+                    object_id=lit_id, object_label=date_value, traversed_forward=True,
+                )],
+                node_ids=[NCHOPIN, lit_id],
+            )
+        out.append(c.model_copy(update=update))
+    return out
+
+
 def claim_text_by_id() -> dict[str, str]:
     return {c.claim_id: c.text for c in canonical_claims()}

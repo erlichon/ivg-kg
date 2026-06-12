@@ -164,6 +164,22 @@ def test_baseline_and_structure_removal():
     assert p22["data"].get("scope_state") == "ver_only"
 
 
+def test_effective_claims_repaired_c3_carries_the_date_support_path():
+    from app.panels.subgraph import support_edges_and_nodes
+
+    # baseline: c3 fabricated with no support path (the gap) -> only its head node
+    base = {c.claim_id: c for c in fx.effective_claims([])}
+    assert base["c3"].status == ClaimStatus.FABRICATED
+    assert not base["c3"].grounding_path.edges
+    # after ADD: c3 is retrieved and its support path is the date triple, so the brush
+    # highlights the edge + the literal node, not just Nicolas Chopin
+    eff = {c.claim_id: c for c in fx.effective_claims([_add_date()])}
+    assert eff["c3"].status == ClaimStatus.RETRIEVED
+    edges, nodes, _ = support_edges_and_nodes(eff["c3"])
+    assert edges == [f"{fx.NCHOPIN}-P569-lit:string:15 April 1771"]
+    assert "lit:string:15 April 1771" in nodes and fx.NCHOPIN in nodes
+
+
 def test_remove_is_absence_induced_and_add_repairs():
     # REMOVE (from generation context) -> absence-induced fabrication; verifier keeps
     # the truth, so it is a genuine fabrication, and it is not a "repair" (leverage 0).

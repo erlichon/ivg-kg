@@ -41,6 +41,7 @@ from ivg_kg.mock.fixtures import (
     ALL_TRIPLE_IDS,
     SUGGESTED_INJECT,
     editable_elements,
+    effective_claims,
     mock_answer_diagnostics,
     mock_single_run_summary,
     statuses_for_graph,
@@ -112,15 +113,16 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
         override = statuses_for_graph(edits)
         return render_claim_list(run, selected or [], grades or [], status_override=override)
 
-    # ---- C: selected/mode/N/kg-selection -> subgraph stylesheet -------------
+    # ---- C: selected/mode/N/kg-selection/edits -> subgraph stylesheet -------
     @app.callback(
         Output("subgraph", "stylesheet"),
         Input("selected-claims", "data"),
         Input("analytics-mode", "value"),
         Input("n-selector", "value"),
         Input("selected-kg-items", "data"),
+        Input("kg-edits", "data"),
     )
-    def style_subgraph(selected, mode, n, kg_selected):  # noqa: ANN001
+    def style_subgraph(selected, mode, n, kg_selected, edits):  # noqa: ANN001
         if mode == "multi":
             diag = mock_answer_diagnostics(int(n or 20))
             sized = support_frequency_stylesheet(BASE_STYLESHEET, diag.support_frequency)
@@ -128,7 +130,10 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
         selected = selected or []
         if not selected:
             return BASE_STYLESHEET
-        ordered = [claims_by_id[cid] for cid in selected if cid in claims_by_id]
+        # effective claims reflect the current edits: the brush hue matches the
+        # re-verified status and a repaired c3 highlights the full date triple.
+        eff = {c.claim_id: c for c in effective_claims(edits)}
+        ordered = [eff[cid] for cid in selected if cid in eff]
         return highlight_stylesheet(BASE_STYLESHEET, ordered, node_labels)
 
     # ---- E: mode + N -> analytics body --------------------------------------
