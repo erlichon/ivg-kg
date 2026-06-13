@@ -194,6 +194,7 @@ class GroundingConfig(BaseModel):
     tau: float = 0.5
     linker: str = "label_alias"
     entailment: str = "minicheck"
+    extractor: str = "rule_based"
 
 
 # ---------------------------------------------------------------------------
