@@ -16,7 +16,7 @@ import uuid
 
 from ivg_kg.data.reference import reference_id
 from ivg_kg.grounding.slice import run_cascade
-from ivg_kg.schema import GradingReference, GroundingConfig, GroundingRun
+from ivg_kg.schema import ClaimStatus, GradingReference, GroundingConfig, GroundingRun
 
 
 def ground_response(
@@ -64,7 +64,6 @@ def ground_response(
 
     total = len(claims)
     if total > 0:
-        from ivg_kg.schema import ClaimStatus
         fabricated = sum(1 for c in claims if c.status == ClaimStatus.FABRICATED)
         error_rates = {"structure": fabricated / total, "text": 0.0, "image": 0.0}
     else:

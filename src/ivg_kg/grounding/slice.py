@@ -164,7 +164,7 @@ def _extract_values(text: str) -> set[str]:
     return vals
 
 
-def entails(premise: str, hypothesis: str, tau: float) -> float:
+def entails(premise: str, hypothesis: str) -> float:
     """Compute a deterministic entailment score for (premise, hypothesis).
 
     SLICE stand-in for GR7 NLI gate.  Asymmetric: premise is the serialised
@@ -173,9 +173,10 @@ def entails(premise: str, hypothesis: str, tau: float) -> float:
     Score = Jaccard(tokens(premise), tokens(hypothesis)).
     Value-sensitive override: if the hypothesis asserts a concrete value
     (date, number, named object) that is absent from or contradicted by the
-    premise, the score is forced to 0.0 (hard fail below tau).
+    premise, the value-check hard-fail forces the score to 0.0.
 
-    Returns float in [0, 1].
+    Returns a raw entailment score in [0, 1].  Thresholding against config.tau
+    happens in the cascade (run_cascade), not here.
     """
     jaccard, _ = _entails_detailed(premise, hypothesis)
     return jaccard
@@ -220,7 +221,7 @@ def _entails_detailed(
             h_vals = {
                 v for v in h_vals
                 if v not in entity_labels
-                and not any(el in v for el in entity_labels if len(el) > 3)
+                and not any(el in v for el in entity_labels if len(el) > 3)  # known slice heuristic; GR7 will replace
             }
         if h_vals:
             p_vals = _extract_values(premise)

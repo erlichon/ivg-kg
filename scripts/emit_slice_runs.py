@@ -19,7 +19,6 @@ Example statuses exercised across the 3 runs:
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from ivg_kg.data.graph_store import load_snapshot

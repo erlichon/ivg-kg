@@ -345,7 +345,7 @@ def test_entailment_gate_value_sensitive():
     # premise says 1944; hypothesis says 1960 -> value check fires
     premise = "The Glass Menagerie date of first performance 1944"
     hypothesis = "The Glass Menagerie was first performed in 1960."
-    score = entails(premise, hypothesis, tau=0.3)
+    score = entails(premise, hypothesis)
     assert score == 0.0, (
         f"Value-sensitive gate should return 0.0 when year is wrong, got {score}"
     )
@@ -355,7 +355,7 @@ def test_entailment_gate_passes_on_correct_value():
     """entails must return a positive score when the correct value is present."""
     premise = "The Glass Menagerie date of first performance 1944"
     hypothesis = "The Glass Menagerie first performance was in 1944."
-    score = entails(premise, hypothesis, tau=0.3)
+    score = entails(premise, hypothesis)
     assert score > 0.3, (
         f"Entailment should pass (>tau) when year matches, got {score}"
     )
