@@ -25,6 +25,27 @@ from ivg_kg.perturbation import available_perturbations
 from ivg_kg.schema import GroundingRun, SingleRunStatusSummary
 
 
+def _slice_label(run: GroundingRun) -> str:
+    """Human-readable label for the slice chip, derived from the loaded run.
+
+    MOCK mode run: slice='books', domain_qid derived from claim -> 'books * Chopin (Q1268)'.
+    REAL mode run: uses run.slice + the first linked entity of the first claim (if any).
+    Falls back to run.slice alone if no entity is available.
+    """
+    slice_name = run.slice or "unknown"
+    # Try to derive a domain entity label from the first claim's first linked entity.
+    entity_label: str | None = None
+    entity_id: str | None = None
+    if run.claims:
+        les = run.claims[0].linked_entities
+        if les:
+            entity_label = les[0].label
+            entity_id = les[0].id
+    if entity_label and entity_id:
+        return f"{slice_name} * {entity_label} ({entity_id})"
+    return slice_name
+
+
 def get_perturbation_controls() -> html.Div:
     """Controls rendered generically from the perturbation registry (seam #3)."""
     registry = available_perturbations()
@@ -43,22 +64,28 @@ def get_perturbation_controls() -> html.Div:
     )
 
 
-def _slice_selector() -> html.Div:
-    """Header data-slice selector (#5). Mock: one books scenario; the gated image
-    slices are shown disabled to signal the design (built post-M-BOOKS)."""
+def _slice_selector(run: GroundingRun) -> html.Div:
+    """Header data-slice selector (#5). The active slice label reflects the loaded run.
+
+    In MOCK mode the label is 'books * Chopin (Q1268)' (derived from the mock run).
+    In REAL mode the label is derived from run.slice + the first linked entity.
+    The gated image slices are shown disabled to signal the design (built post-M-BOOKS).
+    """
+    active_label = _slice_label(run)
+    slice_val = run.slice or "books"
     return html.Div(
         [
             html.Span("slice ", style={"color": theme.FAINT, "fontSize": "0.75em"}),
             dcc.Dropdown(
                 id="slice-selector",
                 options=[
-                    {"label": "books · Chopin (Q1268)", "value": "books"},
-                    {"label": "taxa · range maps — gated (post-M-BOOKS)",
+                    {"label": active_label, "value": slice_val},
+                    {"label": "taxa * range maps -- gated (post-M-BOOKS)",
                      "value": "taxa", "disabled": True},
-                    {"label": "artwork · depicts — gated (post-M-BOOKS)",
+                    {"label": "artwork * depicts -- gated (post-M-BOOKS)",
                      "value": "artwork", "disabled": True},
                 ],
-                value="books",
+                value=slice_val,
                 clearable=False,
                 style={"width": "300px", "color": "#111", "fontSize": "0.8em"},
             ),
@@ -80,7 +107,7 @@ def _header(run: GroundingRun) -> html.Div:
             ),
             html.Div(
                 [
-                    _slice_selector(),
+                    _slice_selector(run),
                     html.Button(
                         "⚙ generation",
                         id="settings-toggle",

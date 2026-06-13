@@ -16,6 +16,7 @@ from __future__ import annotations
 from dash import dcc, html
 
 from app import theme
+from app.run_source import _run_id as _current_run_id
 from ivg_kg.mock.fixtures import (
     ENTITY_OPTIONS,
     SCOPE_LABELS,
@@ -118,7 +119,20 @@ def _edit_label(e: dict) -> str:
 
 
 def render_repair_body(edits: list[dict] | None = None) -> html.Div:
-    """Edits log (with undo) + re-add list + repair-leverage / grounded readout."""
+    """Edits log (with undo) + re-add list + repair-leverage / grounded readout.
+
+    In REAL mode the repair demo is disabled: the interactive KG-edit / repair loop
+    is built for the bundled mock scenario only. A real live re-grounding loop lands
+    with UI5/EX3 (GR9). An honest note is shown instead of Chopin-specific content.
+    """
+    if _current_run_id() is not None:
+        return html.Div(
+            "Interactive KG-edit / repair demo runs on the bundled mock scenario; "
+            "live repair on loaded runs lands with the repair loop (UI5/EX3).",
+            style={"color": theme.FAINT, "fontSize": "0.78em", "fontStyle": "italic",
+                   "padding": "6px 0"},
+        )
+
     edits = edits or []
     removed = removed_triples(edits)
 

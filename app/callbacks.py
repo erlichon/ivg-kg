@@ -38,13 +38,6 @@ from app.panels.subgraph import (
     node_labels_from_elements,
     support_frequency_stylesheet,
 )
-from ivg_kg.mock.fixtures import (
-    ALL_TRIPLE_IDS,
-    SUGGESTED_INJECT,
-    editable_elements,
-    effective_claims,
-    statuses_for_graph,
-)
 from ivg_kg.schema import GroundingRun
 
 _LAYOUT = {"name": "cose", "animate": False, "fit": True, "padding": 24}
@@ -54,7 +47,7 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
     """Register all callbacks (closures over the mock data)."""
     claims_by_id = {c.claim_id: c for c in run.claims}
     node_labels = node_labels_from_elements(elements)
-    base_triple_ids = set(ALL_TRIPLE_IDS)
+    base_triple_ids = set(_run_source.base_triple_ids())
 
     # ---- A: claim click -> selected-claims (toggle; sole writer) ------------
     @app.callback(
@@ -109,7 +102,7 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
         Input("kg-edits", "data"),
     )
     def render_list(selected, grades, edits):  # noqa: ANN001
-        override = statuses_for_graph(edits)
+        override = _run_source.statuses_for_graph(edits)
         return render_claim_list(run, selected or [], grades or [], status_override=override)
 
     # ---- C: selected/mode/N/kg-selection/edits -> subgraph stylesheet -------
@@ -131,7 +124,7 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
             return BASE_STYLESHEET
         # effective claims reflect the current edits: the brush hue matches the
         # re-verified status and a repaired c3 highlights the full date triple.
-        eff = {c.claim_id: c for c in effective_claims(edits)}
+        eff = {c.claim_id: c for c in _run_source.effective_claims(edits)}
         ordered = [eff[cid] for cid in selected if cid in eff]
         return highlight_stylesheet(BASE_STYLESHEET, ordered, node_labels)
 
@@ -167,8 +160,8 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
     def update_elements(edits, node_data, _reset):  # noqa: ANN001
         prop = dash.ctx.triggered[0]["prop_id"] if dash.ctx.triggered else ""
         if prop.startswith("reset-view"):
-            return editable_elements(None), _LAYOUT  # reset clears edits -> base overview
-        full = editable_elements(edits)
+            return _run_source.editable_elements(None), _LAYOUT  # reset clears edits -> base overview
+        full = _run_source.editable_elements(edits)
         if prop.endswith("tapNodeData") and node_data:
             return ego_elements(full, node_data["id"]), _LAYOUT  # zoom to node
         return full, _LAYOUT  # full edited graph (edit / deselect)
@@ -265,7 +258,8 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
         prevent_initial_call=True,
     )
     def suggest(_n):  # noqa: ANN001
-        return SUGGESTED_INJECT["subject"], SUGGESTED_INJECT["relation"], SUGGESTED_INJECT["value"]
+        inj = _run_source.suggested_inject()
+        return inj["subject"], inj["relation"], inj["value"]
 
     # ---- J: edits -> edits log + leverage readout ---------------------------
     @app.callback(
@@ -281,4 +275,4 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
         Input("kg-edits", "data"),
     )
     def recolour_answer(edits):  # noqa: ANN001
-        return answer_span_children(run, statuses_for_graph(edits))
+        return answer_span_children(run, _run_source.statuses_for_graph(edits))

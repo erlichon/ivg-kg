@@ -382,3 +382,200 @@ def test_real_slice_run_subgraph_nonempty(monkeypatch):
     assert len(elements) > 0
     node_ids = {e["data"]["id"] for e in elements if "source" not in e["data"]}
     assert len(node_ids) > 0
+
+
+# ---------------------------------------------------------------------------
+# New interactive-path functions: effective_claims, statuses_for_graph,
+# editable_elements, suggested_inject, base_triple_ids
+# ---------------------------------------------------------------------------
+
+# REAL mode tests (using the actual slice-01-glass-menagerie.json)
+
+def test_real_effective_claims_returns_loaded_run_claims(monkeypatch):
+    """REAL mode: effective_claims([]) returns the loaded run's claims, not mock Chopin."""
+    run_id = "slice-01-glass-menagerie"
+    monkeypatch.setenv("IVG_KG_RUN_ID", run_id)
+
+    import importlib
+
+    import app.run_source as rs
+    importlib.reload(rs)
+
+    claims = rs.effective_claims([])
+    assert len(claims) > 0
+
+    # Must match the loaded run's claim_ids and statuses
+    run = rs.get_grounding_run()
+    run_ids = {c.claim_id for c in run.claims}
+    returned_ids = {c.claim_id for c in claims}
+    assert returned_ids == run_ids
+
+    # Must NOT be the Chopin mock claim ids (c1..c6 matched to Chopin entities)
+    from ivg_kg.mock.fixtures import FCHOPIN, NCHOPIN
+    returned_node_ids = {
+        n_id
+        for c in claims
+        for n_id in c.grounding_path.node_ids
+    }
+    assert FCHOPIN not in returned_node_ids, "REAL mode must not reference Chopin Q1268"
+    assert NCHOPIN not in returned_node_ids, "REAL mode must not reference Nicolas Chopin Q260763"
+
+
+def test_real_effective_claims_support_paths_are_real(monkeypatch):
+    """REAL mode: grounded claims in effective_claims() have non-empty grounding paths."""
+    run_id = "slice-01-glass-menagerie"
+    monkeypatch.setenv("IVG_KG_RUN_ID", run_id)
+
+    import importlib
+
+    import app.run_source as rs
+    importlib.reload(rs)
+
+    from ivg_kg.schema import ClaimStatus
+    claims = rs.effective_claims([])
+    grounded = [c for c in claims if c.status != ClaimStatus.FABRICATED]
+    # At least one grounded claim must have a non-empty path
+    assert any(len(c.grounding_path.node_ids) > 0 for c in grounded), (
+        "At least one grounded claim in the real run must have a non-empty support path"
+    )
+
+
+def test_real_statuses_for_graph_maps_loaded_claim_ids(monkeypatch):
+    """REAL mode: statuses_for_graph([]) maps the loaded run's claim_ids to their real statuses."""
+    run_id = "slice-01-glass-menagerie"
+    monkeypatch.setenv("IVG_KG_RUN_ID", run_id)
+
+    import importlib
+
+    import app.run_source as rs
+    importlib.reload(rs)
+
+    run = rs.get_grounding_run()
+    statuses = rs.statuses_for_graph([])
+
+    # Keys must match the loaded run's claim_ids exactly
+    assert set(statuses.keys()) == {c.claim_id for c in run.claims}
+
+    # Each status must match the run's stored status
+    for claim in run.claims:
+        assert statuses[claim.claim_id] == claim.status, (
+            f"claim {claim.claim_id}: expected {claim.status}, got {statuses[claim.claim_id]}"
+        )
+
+
+def test_real_editable_elements_contains_real_entities(monkeypatch):
+    """REAL mode: editable_elements([]) returns non-empty elements with real node ids."""
+    run_id = "slice-01-glass-menagerie"
+    monkeypatch.setenv("IVG_KG_RUN_ID", run_id)
+
+    import importlib
+
+    import app.run_source as rs
+    importlib.reload(rs)
+
+    elements = rs.editable_elements([])
+    assert len(elements) > 0
+
+    node_ids = {e["data"]["id"] for e in elements if "source" not in e["data"]}
+    assert len(node_ids) > 0
+
+    # Must not contain Chopin-specific entity ids
+    from ivg_kg.mock.fixtures import FCHOPIN, NCHOPIN
+    assert FCHOPIN not in node_ids, "REAL mode editable_elements must not include Q1268 (Chopin)"
+    assert NCHOPIN not in node_ids, "REAL mode editable_elements must not include Q260763 (N. Chopin)"
+
+
+def test_real_suggested_inject_no_chopin(monkeypatch):
+    """REAL mode: suggested_inject() returns blank values, not Chopin pre-fill."""
+    run_id = "slice-01-glass-menagerie"
+    monkeypatch.setenv("IVG_KG_RUN_ID", run_id)
+
+    import importlib
+
+    import app.run_source as rs
+    importlib.reload(rs)
+
+    inj = rs.suggested_inject()
+    # Must not contain Chopin entity ids or 'date of birth' pre-fill
+    from ivg_kg.mock.fixtures import NCHOPIN
+    assert inj.get("subject") != NCHOPIN, "REAL mode must not pre-fill Nicolas Chopin as subject"
+    assert inj.get("relation") != "date of birth", "REAL mode must not pre-fill Chopin date of birth"
+    assert inj.get("value") != "15 April 1771", "REAL mode must not pre-fill Chopin birth date value"
+
+
+# MOCK mode delegation tests for the new functions
+
+def test_mock_effective_claims_delegates_to_fixture(monkeypatch):
+    """MOCK mode: effective_claims(edits) delegates to fixtures.effective_claims."""
+    monkeypatch.delenv("IVG_KG_RUN_ID", raising=False)
+
+    import importlib
+
+    import app.run_source as rs
+    importlib.reload(rs)
+
+    from ivg_kg.mock.fixtures import effective_claims as fix_effective
+    result = rs.effective_claims(None)
+    expected = fix_effective(None)
+    assert len(result) == len(expected)
+    for r, e in zip(result, expected, strict=True):
+        assert r.claim_id == e.claim_id
+        assert r.status == e.status
+
+
+def test_mock_statuses_for_graph_delegates_to_fixture(monkeypatch):
+    """MOCK mode: statuses_for_graph(edits) delegates to fixtures.statuses_for_graph."""
+    monkeypatch.delenv("IVG_KG_RUN_ID", raising=False)
+
+    import importlib
+
+    import app.run_source as rs
+    importlib.reload(rs)
+
+    from ivg_kg.mock.fixtures import statuses_for_graph as fix_statuses
+    result = rs.statuses_for_graph(None)
+    expected = fix_statuses(None)
+    assert result == expected
+
+
+def test_mock_editable_elements_delegates_to_fixture(monkeypatch):
+    """MOCK mode: editable_elements(edits) delegates to fixtures.editable_elements."""
+    monkeypatch.delenv("IVG_KG_RUN_ID", raising=False)
+
+    import importlib
+
+    import app.run_source as rs
+    importlib.reload(rs)
+
+    from ivg_kg.mock.fixtures import editable_elements as fix_editable
+    result = rs.editable_elements(None)
+    expected = fix_editable(None)
+    assert result == expected
+
+
+def test_mock_suggested_inject_delegates_to_fixture(monkeypatch):
+    """MOCK mode: suggested_inject() returns fixtures.SUGGESTED_INJECT."""
+    monkeypatch.delenv("IVG_KG_RUN_ID", raising=False)
+
+    import importlib
+
+    import app.run_source as rs
+    importlib.reload(rs)
+
+    from ivg_kg.mock.fixtures import SUGGESTED_INJECT
+    result = rs.suggested_inject()
+    assert result == SUGGESTED_INJECT
+
+
+def test_mock_base_triple_ids_delegates_to_fixture(monkeypatch):
+    """MOCK mode: base_triple_ids() returns fixtures.ALL_TRIPLE_IDS."""
+    monkeypatch.delenv("IVG_KG_RUN_ID", raising=False)
+
+    import importlib
+
+    import app.run_source as rs
+    importlib.reload(rs)
+
+    from ivg_kg.mock.fixtures import ALL_TRIPLE_IDS
+    result = rs.base_triple_ids()
+    assert result == list(ALL_TRIPLE_IDS)

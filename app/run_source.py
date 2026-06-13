@@ -26,16 +26,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import ivg_kg.mock.fixtures as _fixtures
 from ivg_kg.data.graph_store import nx_to_cyto_elements
 from ivg_kg.diagnostics import aggregate_runset, single_run_summary
-from ivg_kg.mock.fixtures import (
-    mock_answer_diagnostics,
-    mock_grounding_run,
-    mock_single_run_summary,
-    mock_subgraph_elements,
-)
 from ivg_kg.schema import (
     AnswerDiagnostics,
+    ClaimRecord,
+    ClaimStatus,
     GroundingRun,
     KGEdge,
     KGNode,
@@ -227,7 +224,7 @@ def get_grounding_run() -> GroundingRun:
     """
     rid = _run_id()
     if rid is None:
-        return mock_grounding_run()
+        return _fixtures.mock_grounding_run()
     return _load_run(rid)
 
 
@@ -240,7 +237,7 @@ def get_subgraph_elements() -> list[dict]:
     """
     rid = _run_id()
     if rid is None:
-        return mock_subgraph_elements()
+        return _fixtures.mock_subgraph_elements()
     run = _load_run(rid)
     snapshot = _derive_subgraph_snapshot(run)
     return nx_to_cyto_elements(snapshot)
@@ -254,7 +251,7 @@ def get_single_run_summary() -> SingleRunStatusSummary:
     """
     rid = _run_id()
     if rid is None:
-        return mock_single_run_summary()
+        return _fixtures.mock_single_run_summary()
     run = _load_run(rid)
     return single_run_summary(run)
 
@@ -269,8 +266,81 @@ def get_answer_diagnostics(n: int) -> AnswerDiagnostics:
     """
     rid = _run_id()
     if rid is None:
-        return mock_answer_diagnostics(n)
+        return _fixtures.mock_answer_diagnostics(n)
     primary = _load_run(rid)
     all_runs = _load_slice_runs(primary)
     capped = all_runs[:n] if len(all_runs) > n else all_runs
     return aggregate_runset(capped)
+
+
+# ---------------------------------------------------------------------------
+# Interactive / edit-layer functions (replaces direct fixture imports in callbacks)
+# ---------------------------------------------------------------------------
+
+def effective_claims(edits: list[dict] | None = None) -> list[ClaimRecord]:
+    """Return claims with re-graded statuses for the subgraph-highlight brush.
+
+    MOCK mode: delegates to fixtures.effective_claims(edits) -- full edit re-grade
+               including the Chopin date-gap repair demo.
+    REAL mode: returns the loaded run's claims as-is (real grounding_paths intact);
+               edits are a NO-OP -- live re-grounding is a later task (GR9/UI5/EX3).
+    """
+    rid = _run_id()
+    if rid is None:
+        return _fixtures.effective_claims(edits)
+    run = _load_run(rid)
+    return list(run.claims)
+
+
+def statuses_for_graph(edits: list[dict] | None = None) -> dict[str, ClaimStatus]:
+    """Return per-claim status map for the claim list and answer-span recolour.
+
+    MOCK mode: delegates to fixtures.statuses_for_graph(edits).
+    REAL mode: {c.claim_id: c.status for c in loaded run.claims}; edits no-op.
+    """
+    rid = _run_id()
+    if rid is None:
+        return _fixtures.statuses_for_graph(edits)
+    run = _load_run(rid)
+    return {c.claim_id: c.status for c in run.claims}
+
+
+def editable_elements(edits: list[dict] | None = None) -> list[dict]:
+    """Return cytoscape elements for the subgraph (edited view).
+
+    MOCK mode: delegates to fixtures.editable_elements(edits) -- Chopin KG with
+               full scope-state annotation for the edit demo.
+    REAL mode: derives the support subgraph from the loaded run's claim paths
+               (same logic as get_subgraph_elements); edits are a NO-OP.
+    """
+    rid = _run_id()
+    if rid is None:
+        return _fixtures.editable_elements(edits)
+    run = _load_run(rid)
+    snapshot = _derive_subgraph_snapshot(run)
+    return nx_to_cyto_elements(snapshot)
+
+
+def suggested_inject() -> dict:
+    """Return pre-fill values for the add-triplet form.
+
+    MOCK mode: returns fixtures.SUGGESTED_INJECT (Nicolas Chopin date-of-birth suggestion).
+    REAL mode: returns blank values -- no Chopin pre-fill in a real-run context.
+    """
+    rid = _run_id()
+    if rid is None:
+        return _fixtures.SUGGESTED_INJECT
+    return {"subject": None, "relation": "", "value": ""}
+
+
+def base_triple_ids() -> list[str]:
+    """Return the base triple ids for edge-detail 'exists in base KG' logic.
+
+    MOCK mode: returns fixtures.ALL_TRIPLE_IDS (the four Chopin base triples).
+    REAL mode: returns an empty list -- no mock triple ids injected into real-mode
+               edge detail; real run files do not embed a triple-id registry.
+    """
+    rid = _run_id()
+    if rid is None:
+        return list(_fixtures.ALL_TRIPLE_IDS)
+    return []
