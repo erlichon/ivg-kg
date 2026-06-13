@@ -6,7 +6,7 @@ Lazy imports are verified by monkeypatching the module-level name before call.
 
 Coverage:
   - ABC cannot be instantiated; defines contract.
-  - EchoClient: minimal concrete implementation proves the ABC contract.
+  - _make_echo_client: minimal in-test BaseAIClient subclass proves the ABC contract.
   - GenerationResult: pydantic v2 round-trip, evidence_trace seam.
   - LocalModelClient: module-importable without torch; lazy import guarded.
   - OllamaClient: module-importable without requests; lazy import guarded.
@@ -120,33 +120,6 @@ class TestBaseAIClientABC:
 # ---------------------------------------------------------------------------
 # EchoClient -- proves ABC contract via a tiny in-test implementation
 # ---------------------------------------------------------------------------
-
-
-class EchoClient:
-    """Minimal in-test BaseAIClient implementation for contract verification."""
-
-    supports_evidence_trace: bool = False
-
-    def __init__(self) -> None:
-        from ivg_kg.grounding.clients.base import BaseAIClient
-
-        # EchoClient must be a valid subclass -- verify it satisfies the ABC
-        # by constructing it after the ABC import succeeds.
-        # (We inherit manually below; this line is just the import guard.)
-        _ = BaseAIClient
-
-    def _generate(
-        self,
-        question: str,
-        context: Any,
-        *,
-        temperature: float = 0.7,
-        seed: int | None = None,
-    ) -> Any:
-        from ivg_kg.grounding.clients.base import GenerationResult
-
-        return GenerationResult(answer=f"echo: {question}")
-
 
 # We need a proper subclass to pass ABC checks.
 def _make_echo_client() -> Any:

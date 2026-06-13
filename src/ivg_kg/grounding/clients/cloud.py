@@ -39,6 +39,15 @@ class CloudAIClient(BaseAIClient):
         temperature: float = 0.7,
         seed: int | None = None,
     ) -> GenerationResult:
+        """Not yet implemented -- raises NotImplementedError unconditionally.
+
+        This method is a placeholder seam for a future cloud/API LLM backend.
+        No cloud SDK or HTTP call is made here.  To wire up a real provider:
+          1. Replace this raise with a lazy SDK import + actual API call.
+          2. Update supports_evidence_trace if the provider exposes grounding
+             traces (see BaseAIClient docstring for the evidence-trace seam).
+          3. Add any required credentials/config constants to ivg_kg.config.
+        """
         raise NotImplementedError(
             "CloudAIClient is a seam stub: no cloud provider is configured. "
             "Set DEFAULT_CLIENT_BACKEND to 'local' or 'ollama', or implement "
