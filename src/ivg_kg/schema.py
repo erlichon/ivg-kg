@@ -80,6 +80,18 @@ class Condition(StrEnum):
     IMAGE_ABSENT = "image-absent"  # image axis only; unused in the books spine
 
 
+class EpistemicLevel(StrEnum):
+    """Schema-enforced glyph contract for uncertainty provenance (SPEC-text §4.9d).
+
+    The string values are frozen: they are the glyph selector used by the UI layer.
+    Do not change them.
+    """
+
+    OBSERVATIONAL = "observational"            # support-frequency (open circle)
+    INTERVENTIONAL_AGGREGATE = "interventional"  # offline sweep (filled triangle + interval)
+    SINGLE_SAMPLE = "n1"                       # single-run REMOVE/ADD delta (outlined n=1 triangle)
+
+
 # ---------------------------------------------------------------------------
 # Utility reference selector
 # ---------------------------------------------------------------------------
@@ -302,6 +314,8 @@ class GroundingRun(BaseModel):
     phase: str
     condition: Condition = Condition.FULL
     sample_index: int = 0
+    # a perturbed run points at its pre-perturbation baseline run (durable before/after pairing for the REMOVE delta; §4.5)
+    baseline_run_id: str | None = None
     claims: list[ClaimRecord]
     active_perturbations: list[str] = Field(default_factory=list)
     grading_reference_id: str | None = None
@@ -346,6 +360,7 @@ class SingleRunStatusSummary(BaseModel):
 
     status_counts: dict[str, int]  # {status: count} for THIS one run
     status_percentages: dict[str, float]  # {status: fraction} for THIS one run — no SE
+    epistemic_level: EpistemicLevel = EpistemicLevel.SINGLE_SAMPLE  # the n=1 single-sample glyph contract (§4.9d)
 
 
 class StatusMeanSE(BaseModel):
@@ -375,6 +390,7 @@ class AnswerDiagnostics(BaseModel):
     # KG-item id (entity_id OR triplet_id "<subject_id>|<property_id>|<object_id>")
     # -> fraction of the N runs it was USED to ground a claim (observational; §4.8)
     support_frequency: dict[str, float] = Field(default_factory=dict)
+    epistemic_level: EpistemicLevel = EpistemicLevel.OBSERVATIONAL  # support-frequency is observational glyph contract (§4.9d)
 
 
 class RepairResult(BaseModel):

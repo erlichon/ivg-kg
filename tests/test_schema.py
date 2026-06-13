@@ -506,3 +506,188 @@ def test_content_label_image_modality() -> None:
     reconstructed = ContentLabel.model_validate_json(json_str)
     assert reconstructed.modality == Modality.IMAGE
     assert isinstance(reconstructed.modality, Modality)
+
+
+# ---------------------------------------------------------------------------
+# EpistemicLevel enum (S2-delta)
+# ---------------------------------------------------------------------------
+
+def test_epistemic_level_exact_values() -> None:
+    """EpistemicLevel string values are frozen schema-enforced glyph contracts (SS4.9d)."""
+    from ivg_kg.schema import EpistemicLevel
+
+    assert set(EpistemicLevel) == {
+        EpistemicLevel.OBSERVATIONAL,
+        EpistemicLevel.INTERVENTIONAL_AGGREGATE,
+        EpistemicLevel.SINGLE_SAMPLE,
+    }
+    assert EpistemicLevel.OBSERVATIONAL.value == "observational"
+    assert EpistemicLevel.INTERVENTIONAL_AGGREGATE.value == "interventional"
+    assert EpistemicLevel.SINGLE_SAMPLE.value == "n1"
+
+
+def test_epistemic_level_string_values_exhaustive() -> None:
+    """Exactly the three values exist; no extras."""
+    from ivg_kg.schema import EpistemicLevel
+
+    assert {e.value for e in EpistemicLevel} == {"observational", "interventional", "n1"}
+
+
+# ---------------------------------------------------------------------------
+# GroundingRun.baseline_run_id (S2-delta)
+# ---------------------------------------------------------------------------
+
+def test_grounding_run_baseline_run_id_default_none() -> None:
+    """baseline_run_id defaults to None so existing runs remain valid."""
+    run = GroundingRun(
+        run_id="r-base",
+        question="Q?",
+        answer_text="A.",
+        slice="books",
+        phase="A",
+        claims=[],
+    )
+    assert run.baseline_run_id is None
+
+
+def test_grounding_run_baseline_run_id_set_and_round_trip() -> None:
+    """baseline_run_id survives model_dump_json / model_validate_json unchanged."""
+    run = GroundingRun(
+        run_id="chopin-ka-0",
+        question="Q?",
+        answer_text="A.",
+        slice="books",
+        phase="A",
+        claims=[],
+        baseline_run_id="chopin-full-0",
+    )
+    assert run.baseline_run_id == "chopin-full-0"
+    json_str = run.model_dump_json()
+    reconstructed = GroundingRun.model_validate_json(json_str)
+    assert reconstructed.baseline_run_id == "chopin-full-0"
+    assert reconstructed == run
+
+
+def test_grounding_run_baseline_run_id_none_round_trip() -> None:
+    """None baseline_run_id also survives round-trip."""
+    run = GroundingRun(
+        run_id="r-no-baseline",
+        question="Q?",
+        answer_text="A.",
+        slice="books",
+        phase="A",
+        claims=[],
+        baseline_run_id=None,
+    )
+    json_str = run.model_dump_json()
+    reconstructed = GroundingRun.model_validate_json(json_str)
+    assert reconstructed.baseline_run_id is None
+    assert reconstructed == run
+
+
+# ---------------------------------------------------------------------------
+# EpistemicLevel defaults on SingleRunStatusSummary and AnswerDiagnostics (S2-delta)
+# ---------------------------------------------------------------------------
+
+def test_single_run_status_summary_epistemic_level_default() -> None:
+    """SingleRunStatusSummary.epistemic_level defaults to SINGLE_SAMPLE (SS4.9d)."""
+    from ivg_kg.schema import EpistemicLevel, SingleRunStatusSummary
+
+    s = SingleRunStatusSummary(
+        status_counts={"retrieved": 1, "reasoned-supportable": 0, "fabricated": 0},
+        status_percentages={"retrieved": 1.0, "reasoned-supportable": 0.0, "fabricated": 0.0},
+    )
+    assert s.epistemic_level == EpistemicLevel.SINGLE_SAMPLE
+    assert s.epistemic_level.value == "n1"
+
+
+def test_single_run_status_summary_epistemic_level_round_trip() -> None:
+    """epistemic_level survives JSON round-trip as an EpistemicLevel member."""
+    from ivg_kg.schema import EpistemicLevel, SingleRunStatusSummary
+
+    s = SingleRunStatusSummary(
+        status_counts={"retrieved": 2, "reasoned-supportable": 1, "fabricated": 1},
+        status_percentages={"retrieved": 0.5, "reasoned-supportable": 0.25, "fabricated": 0.25},
+    )
+    json_str = s.model_dump_json()
+    reconstructed = SingleRunStatusSummary.model_validate_json(json_str)
+    assert reconstructed.epistemic_level == EpistemicLevel.SINGLE_SAMPLE
+    assert isinstance(reconstructed.epistemic_level, EpistemicLevel)
+
+
+def test_answer_diagnostics_epistemic_level_default() -> None:
+    """AnswerDiagnostics.epistemic_level defaults to OBSERVATIONAL (SS4.9d)."""
+    from ivg_kg.schema import AnswerDiagnostics, EpistemicLevel, StatusMeanSE
+
+    d = AnswerDiagnostics(
+        question="Q?",
+        n_runs=5,
+        status_distribution={
+            "retrieved": StatusMeanSE(mean=0.5, se=0.1),
+            "reasoned-supportable": StatusMeanSE(mean=0.3, se=0.05),
+            "fabricated": StatusMeanSE(mean=0.2, se=0.08),
+        },
+    )
+    assert d.epistemic_level == EpistemicLevel.OBSERVATIONAL
+    assert d.epistemic_level.value == "observational"
+
+
+def test_answer_diagnostics_epistemic_level_round_trip() -> None:
+    """epistemic_level on AnswerDiagnostics survives JSON round-trip."""
+    from ivg_kg.schema import AnswerDiagnostics, EpistemicLevel, StatusMeanSE
+
+    d = AnswerDiagnostics(
+        question="Q?",
+        n_runs=10,
+        status_distribution={
+            "retrieved": StatusMeanSE(mean=0.6, se=0.05),
+            "reasoned-supportable": StatusMeanSE(mean=0.2, se=0.03),
+            "fabricated": StatusMeanSE(mean=0.2, se=0.03),
+        },
+    )
+    json_str = d.model_dump_json()
+    reconstructed = AnswerDiagnostics.model_validate_json(json_str)
+    assert reconstructed.epistemic_level == EpistemicLevel.OBSERVATIONAL
+    assert isinstance(reconstructed.epistemic_level, EpistemicLevel)
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics functions emit correct epistemic_level (S2-delta)
+# ---------------------------------------------------------------------------
+
+def test_single_run_summary_produces_single_sample_level() -> None:
+    """single_run_summary() must produce epistemic_level == SINGLE_SAMPLE (SS4.9d)."""
+    from ivg_kg.diagnostics import single_run_summary
+    from ivg_kg.schema import EpistemicLevel
+    from ivg_kg.schema import SingleRunStatusSummary as SingleRunStatusSummaryAlias
+
+    run = _make_grounding_run()
+    summary = single_run_summary(run)
+    assert summary.epistemic_level == EpistemicLevel.SINGLE_SAMPLE
+    # verify it also survives round-trip
+    json_str = summary.model_dump_json()
+    reconstructed = SingleRunStatusSummaryAlias.model_validate_json(json_str)
+    assert reconstructed.epistemic_level == EpistemicLevel.SINGLE_SAMPLE
+
+
+def test_aggregate_runset_produces_observational_level() -> None:
+    """aggregate_runset() must produce epistemic_level == OBSERVATIONAL (SS4.9d)."""
+    from ivg_kg.diagnostics import aggregate_runset
+    from ivg_kg.schema import AnswerDiagnostics, EpistemicLevel
+
+    run1 = _make_grounding_run()
+    run2 = GroundingRun(
+        run_id="run-002",
+        question="Who is Douglas Adams?",
+        answer_text="Douglas Adams.",
+        slice="books",
+        phase="A",
+        claims=[_make_claim_retrieved()],
+    )
+    diag = aggregate_runset([run1, run2])
+    assert isinstance(diag, AnswerDiagnostics)
+    assert diag.epistemic_level == EpistemicLevel.OBSERVATIONAL
+    # round-trip
+    json_str = diag.model_dump_json()
+    reconstructed = AnswerDiagnostics.model_validate_json(json_str)
+    assert reconstructed.epistemic_level == EpistemicLevel.OBSERVATIONAL

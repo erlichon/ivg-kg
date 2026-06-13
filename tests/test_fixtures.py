@@ -205,3 +205,90 @@ def test_entity_content_removal_and_add():
     add = [{"op": "add", "kind": "entity", "scope": "both", "id": "new:Q-x",
             "label": "Test Entity", "description": "a mock entity"}]
     assert any(e["data"].get("id") == "new:Q-x" for e in fx.editable_elements(add))
+
+
+# ---------------------------------------------------------------------------
+# EpistemicLevel defaults via diagnostics (S2-delta)
+# ---------------------------------------------------------------------------
+
+def test_single_run_summary_epistemic_level_is_single_sample():
+    """single_run_summary applied to the mock run must carry SINGLE_SAMPLE (SS4.9d)."""
+    from ivg_kg.schema import EpistemicLevel
+
+    s = fx.mock_single_run_summary()
+    assert s.epistemic_level == EpistemicLevel.SINGLE_SAMPLE
+    assert s.epistemic_level.value == "n1"
+
+
+def test_answer_diagnostics_epistemic_level_is_observational():
+    """aggregate_runset applied to the mock runset must carry OBSERVATIONAL (SS4.9d)."""
+    from ivg_kg.schema import EpistemicLevel
+
+    d = fx.mock_answer_diagnostics(20)
+    assert d.epistemic_level == EpistemicLevel.OBSERVATIONAL
+    assert d.epistemic_level.value == "observational"
+
+
+# ---------------------------------------------------------------------------
+# mock_remove_delta_pair (S2-delta, SS4.5)
+# ---------------------------------------------------------------------------
+
+def test_mock_remove_delta_pair_baseline_run_id_linkage():
+    """The perturbed run's baseline_run_id must equal the baseline run's run_id."""
+    baseline, perturbed = fx.mock_remove_delta_pair()
+    assert perturbed.baseline_run_id == baseline.run_id
+    assert baseline.baseline_run_id is None  # baseline has no baseline
+
+
+def test_mock_remove_delta_pair_active_perturbations_non_empty():
+    """The perturbed run must carry at least one active perturbation (REMOVE op)."""
+    _baseline, perturbed = fx.mock_remove_delta_pair()
+    assert perturbed.active_perturbations, "perturbed run must declare at least one active perturbation"
+
+
+def test_mock_remove_delta_pair_condition_contrast():
+    """Baseline is FULL; perturbed is a withhold condition (KNOWLEDGE_ABSENT or CONTENT_ABSENT)."""
+    from ivg_kg.schema import Condition
+
+    baseline, perturbed = fx.mock_remove_delta_pair()
+    assert baseline.condition == Condition.FULL
+    assert perturbed.condition in (Condition.KNOWLEDGE_ABSENT, Condition.CONTENT_ABSENT)
+
+
+def test_mock_remove_delta_pair_fabrication_flip():
+    """At least one claim that was grounded in the baseline is FABRICATED in the perturbed run."""
+    baseline, perturbed = fx.mock_remove_delta_pair()
+    baseline_grounded = {
+        c.claim_id.split("-", 1)[-1]  # strip any run-index prefix
+        for c in baseline.claims
+        if c.status != ClaimStatus.FABRICATED
+    }
+    # The perturbed run uses a shared canonical claim_id scheme; at least one claim
+    # grounded in the baseline must now be fabricated.
+    perturbed_fabricated = {
+        c.claim_id.split("-", 1)[-1]
+        for c in perturbed.claims
+        if c.status == ClaimStatus.FABRICATED
+    }
+    assert baseline_grounded & perturbed_fabricated, (
+        "Expected >=1 claim grounded in baseline but FABRICATED in perturbed run"
+    )
+
+
+def test_mock_remove_delta_pair_json_round_trip():
+    """Both runs in the pair survive model_dump_json / model_validate_json."""
+    from ivg_kg.schema import GroundingRun
+
+    baseline, perturbed = fx.mock_remove_delta_pair()
+    for run in (baseline, perturbed):
+        json_str = run.model_dump_json()
+        reconstructed = GroundingRun.model_validate_json(json_str)
+        assert reconstructed == run
+
+
+def test_mock_remove_delta_pair_deterministic():
+    """Two calls must return identical data (deterministic/offline)."""
+    b1, p1 = fx.mock_remove_delta_pair()
+    b2, p2 = fx.mock_remove_delta_pair()
+    assert b1.model_dump() == b2.model_dump()
+    assert p1.model_dump() == p2.model_dump()

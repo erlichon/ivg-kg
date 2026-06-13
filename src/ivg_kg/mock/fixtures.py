@@ -19,6 +19,9 @@ Public surface:
   mock_answer_diagnostics(n,cond)-> multi-run AnswerDiagnostics for one condition
   mock_condition_diagnostics(n)  -> {condition: AnswerDiagnostics} : the withhold shift
   repair_result(present,injected)-> RepairResult : the edit-the-KG flip count
+  mock_remove_delta_pair()       -> (baseline: GroundingRun, perturbed: GroundingRun) :
+                                    FULL baseline + KNOWLEDGE_ABSENT perturbed with
+                                    baseline_run_id set; the n=1 REMOVE delta (SS4.5).
   CLAIM_SPANS                    -> {claim_id: substring of answer_text} for inline colouring
   QUESTION, ANSWER_TEXT, ERROR_RATES, N_CHOICES
 """
@@ -295,6 +298,72 @@ def mock_grounding_run() -> GroundingRun:
 def mock_single_run_summary() -> SingleRunStatusSummary:
     """Single-run status counts + percentages for the displayed answer (no SE; §4.8)."""
     return single_run_summary(mock_grounding_run())
+
+
+def mock_remove_delta_pair() -> tuple[GroundingRun, GroundingRun]:
+    """REMOVE before/after run pair for the n=1 single-run delta (SPEC-text §4.5).
+
+    Returns (baseline_run, perturbed_run) where:
+    - baseline_run: FULL-condition run (chopin-full-0), the pre-perturbation reference.
+    - perturbed_run: KNOWLEDGE_ABSENT run whose baseline_run_id points at the baseline.
+      The father triple (P22) is withheld from the generation context; claims c1 and c5
+      that depended on P22 are now FABRICATED (absence-induced: the grader still holds
+      the full reference). active_perturbations declares the REMOVE op.
+
+    The pair is the mock data source for the UI's n=1 outlined-triangle glyph (§4.9d).
+    Offline, deterministic.
+    """
+    baseline = mock_grounding_run()  # FULL condition, run_id = "chopin-full-0"
+
+    # Build the claims for the knowledge-absent (P22 withheld) run.
+    # c1 (father triple) and c5 (spurious path via P22) become absence-induced FABRICATED.
+    # c2, c4, c6 remain grounded (P19/P17/P800 still present).
+    # c3 stays FABRICATED (the date gap, unrelated to the REMOVE op).
+    empty_path = GroundingPath(edges=[], node_ids=[])
+    templates = {c.claim_id: c for c in canonical_claims()}
+
+    def _absent_claim(cid: str, text: str) -> ClaimRecord:
+        tmpl = templates[cid]
+        return ClaimRecord(
+            claim_id=f"rm-{cid}",
+            text=text,
+            status=ClaimStatus.FABRICATED,
+            support_source=SupportSource.NONE,
+            linked_entities=list(tmpl.linked_entities),
+            grounding_path=empty_path,
+            active_perturbations=["remove-P22"],
+        )
+
+    perturbed_claims: list[ClaimRecord] = [
+        # c1 -- absence-induced: father triple withheld from generation context
+        _absent_claim("c1", templates["c1"].text),
+        # c2 -- still grounded (P19 intact)
+        templates["c2"].model_copy(update={"claim_id": "rm-c2"}),
+        # c3 -- still fabricated (the date gap)
+        templates["c3"].model_copy(update={"claim_id": "rm-c3"}),
+        # c4 -- still grounded (P19+P17 intact)
+        templates["c4"].model_copy(update={"claim_id": "rm-c4"}),
+        # c5 -- absence-induced: its path goes through P22 (FCHOPIN->father->NCHOPIN)
+        _absent_claim("c5", templates["c5"].text),
+        # c6 -- still grounded (P800 intact)
+        templates["c6"].model_copy(update={"claim_id": "rm-c6"}),
+    ]
+
+    perturbed = GroundingRun(
+        run_id="chopin-ka-0",
+        question=QUESTION,
+        answer_text=ANSWER_TEXT,
+        slice="books",
+        phase="A",
+        condition=Condition.KNOWLEDGE_ABSENT,
+        sample_index=0,
+        baseline_run_id=baseline.run_id,  # durable before/after pairing (§4.5)
+        claims=perturbed_claims,
+        active_perturbations=["remove-P22"],
+        grading_reference_id="chopin-mock-v1",
+        error_rates=dict(ERROR_RATES),
+    )
+    return baseline, perturbed
 
 
 # ---------------------------------------------------------------------------
