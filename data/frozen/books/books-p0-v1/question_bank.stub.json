@@ -1,0 +1,37 @@
+{
+  "bank_id": "bank-books-p0-stub",
+  "slice_id": "books-p0-v1",
+  "items": [
+    {
+      "item_id": "qb-s001",
+      "question": "Who wrote The Glass Menagerie?",
+      "tier": "one_hop_retrieval",
+      "entity_id": "Q678832",
+      "slice_id": "books-p0-v1",
+      "fact_type": "knowledge_structure",
+      "out_of_slice_expected": false,
+      "notes": "direct triple: Q678832 --[P50 author]--> Q134262 (Tennessee Williams)"
+    },
+    {
+      "item_id": "qb-s002",
+      "question": "Which publisher released The Glass Menagerie, and who published another work by the same author?",
+      "tier": "multi_hop_reasoning",
+      "entity_id": "Q678832",
+      "slice_id": "books-p0-v1",
+      "fact_type": null,
+      "out_of_slice_expected": true,
+      "notes": "multi-hop: Q678832 --[P123 publisher]--> Q744182 (Random House); then ask about other Williams works -- out-of-slice mentions expected"
+    },
+    {
+      "item_id": "qb-s003",
+      "question": "What is the genre and form of The Glass Menagerie?",
+      "tier": "ablated_entity",
+      "entity_id": "Q678832",
+      "slice_id": "books-p0-v1",
+      "fact_type": "genre_form",
+      "out_of_slice_expected": false,
+      "notes": "targets genre/form (P136=memory play Q17148218, P7937=play Q25379); ablation of Q678832 description tests content-absence sensitivity"
+    }
+  ],
+  "schema_version": "1.0"
+}

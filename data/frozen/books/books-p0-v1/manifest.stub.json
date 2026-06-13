@@ -1,0 +1,22 @@
+{
+  "_doc": "AblationManifest stub for books-p0-v1. base_slice_id identifies the frozen slice. perturbations is an ORDERED list of withhold operations applied in sequence to the GenerationContext (never to the GradingReference). TextContentAbsence withholds the entity description (text axis). KnowledgeAbsence withholds specified triples (structure axis). All entries are fixed before inspection (Invariant #9).",
+  "base_slice_id": "books-p0-v1",
+  "perturbations": [
+    {
+      "entity_id": "Q678832",
+      "id": "text_content_absence:Q678832",
+      "type_name": "text_content_absence"
+    },
+    {
+      "id": "knowledge_absence:93fdd7b29b2dbaf2",
+      "triples": [
+        {
+          "object_id": "Q134262",
+          "property_id": "P50",
+          "subject_id": "Q678832"
+        }
+      ],
+      "type_name": "knowledge_absence"
+    }
+  ]
+}
