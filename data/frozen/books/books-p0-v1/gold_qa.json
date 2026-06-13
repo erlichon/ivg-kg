@@ -1,0 +1,103 @@
+{
+  "set_id": "gold-books-p0-v1",
+  "slice_id": "books-p0-v1",
+  "items": [
+    {
+      "item_id": "gq-c001",
+      "question": "Who wrote The Glass Menagerie?",
+      "entity_id": "Q678832",
+      "slice_id": "books-p0-v1",
+      "expected_outcomes": [
+        {
+          "claim_text": "The Glass Menagerie author Tennessee Williams",
+          "expected_status": "retrieved",
+          "modality": "structure"
+        }
+      ],
+      "adversarial_negative": false,
+      "fold": "calibration",
+      "notes": "direct triple Q678832 --[P50 author]--> Q134262"
+    },
+    {
+      "item_id": "gq-c002",
+      "question": "What kind of play is The Glass Menagerie?",
+      "entity_id": "Q678832",
+      "slice_id": "books-p0-v1",
+      "expected_outcomes": [
+        {
+          "claim_text": "The Glass Menagerie is a memory play",
+          "expected_status": "retrieved",
+          "modality": "text"
+        }
+      ],
+      "adversarial_negative": false,
+      "fold": "calibration",
+      "notes": "text content label for Q678832"
+    },
+    {
+      "item_id": "gq-c003",
+      "question": "Who wrote Principles of Economics?",
+      "entity_id": "Q4338113",
+      "slice_id": "books-p0-v1",
+      "expected_outcomes": [
+        {
+          "claim_text": "Principles of Economics author Carl Menger",
+          "expected_status": "retrieved",
+          "modality": "structure"
+        }
+      ],
+      "adversarial_negative": false,
+      "fold": "calibration",
+      "notes": "direct triple Q4338113 --[P50 author]--> Q84177"
+    },
+    {
+      "item_id": "gq-s001",
+      "question": "Tell me about Pelevin's books.",
+      "entity_id": "Q105485274",
+      "slice_id": "books-p0-v1",
+      "expected_outcomes": [
+        {
+          "claim_text": "Blue Lantern and DTP(NN) were written by Victor Pelevin",
+          "expected_status": "reasoned-supportable",
+          "modality": "structure"
+        }
+      ],
+      "adversarial_negative": false,
+      "fold": "sweep",
+      "notes": "genuine 2-hop shared-author path Q105485274 --[author]--> Q246722 <--[author]-- Q105623200"
+    },
+    {
+      "item_id": "gq-s002",
+      "question": "What is Principles of Economics about?",
+      "entity_id": "Q4338113",
+      "slice_id": "books-p0-v1",
+      "expected_outcomes": [
+        {
+          "claim_text": "Principles of Economics concerns economics",
+          "expected_status": "retrieved",
+          "modality": "text"
+        }
+      ],
+      "adversarial_negative": false,
+      "fold": "sweep",
+      "notes": "text content label for Q4338113"
+    },
+    {
+      "item_id": "gq-s003",
+      "question": "Who wrote The Glass Menagerie?",
+      "entity_id": "Q678832",
+      "slice_id": "books-p0-v1",
+      "expected_outcomes": [
+        {
+          "claim_text": "The Glass Menagerie author Harold Pinter",
+          "expected_status": "fabricated",
+          "modality": "structure"
+        }
+      ],
+      "adversarial_negative": true,
+      "fold": "sweep",
+      "notes": "adversarial value-swapped negative (section-6 control): entity Q678832 IS in reference but the author value is wrong (the true author is Tennessee Williams). A value-sensitive grader must grade FABRICATED; an entity-match-only grader passes."
+    }
+  ],
+  "schema_version": "1.0"
+}

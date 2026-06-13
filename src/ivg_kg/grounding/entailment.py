@@ -36,6 +36,7 @@ Factory:
     make_entailment_gate(config) reads config.entailment ("lexical" /
     "deberta" / "minicheck") and returns the configured gate.
 """
+
 from __future__ import annotations
 
 import re
@@ -156,7 +157,8 @@ def _jaccard_with_value_guard(
     if h_vals:
         if entity_labels is not None:
             h_vals = {
-                v for v in h_vals
+                v
+                for v in h_vals
                 if v not in entity_labels
                 and not any(el in v for el in entity_labels if len(el) > 3)
             }
@@ -222,6 +224,7 @@ def _load_deberta_model(model_id: str) -> Any:  # pragma: no cover
     """
     import torch  # noqa: PLC0415 -- intentionally lazy
     import transformers  # noqa: PLC0415 -- intentionally lazy
+
     pipeline = transformers.pipeline(
         "zero-shot-classification",
         model=model_id,
@@ -241,6 +244,7 @@ def _load_minicheck_model(model_id: str) -> Any:  # pragma: no cover
     # Import is deferred to keep the module importable without transformers.
     import torch  # noqa: PLC0415 -- intentionally lazy
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer  # noqa: PLC0415
+
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForSeq2SeqLM.from_pretrained(model_id, torch_dtype=torch.float32)
     model.eval()
@@ -271,6 +275,7 @@ class DebertaEntailmentGate(BaseEntailmentGate):
         from ivg_kg import (
             config as _cfg,  # noqa: PLC0415 -- local config import, not a generator client
         )
+
         self._model_id = model_id or _cfg.DEBERTA_NLI_MODEL_ID
         self._pipeline: Any = None  # loaded lazily on first _score() call
 
@@ -293,9 +298,7 @@ class DebertaEntailmentGate(BaseEntailmentGate):
             candidate_labels=["entailment", "neutral", "contradiction"],
             hypothesis_template="{}",
         )
-        label_scores: dict[str, float] = dict(
-            zip(result["labels"], result["scores"], strict=False)
-        )
+        label_scores: dict[str, float] = dict(zip(result["labels"], result["scores"], strict=False))
         return float(label_scores.get("entailment", 0.0))
 
 
@@ -324,18 +327,24 @@ class MiniCheckEntailmentGate(BaseEntailmentGate):
     def __init__(self, model_id: str | None = None) -> None:
         super().__init__()
         from ivg_kg import config as _cfg  # noqa: PLC0415
+
         self._model_id = model_id or _cfg.MINICHECK_MODEL_ID
         self._tokenizer: Any = None  # loaded lazily
-        self._model: Any = None      # loaded lazily
+        self._model: Any = None  # loaded lazily
 
     def _score(self, premise: str, hypothesis: str) -> float:  # pragma: no cover
         """Fact-checking score via MiniCheck-7B.
 
-        Returns a probability in [0, 1] that the premise supports the hypothesis
-        (fact-checking direction: premise = document, hypothesis = claim).
+        Returns a CALIBRATED support probability in [0, 1] that the premise
+        supports the hypothesis (fact-checking direction: premise = document,
+        hypothesis = claim).  The probability is read from the FIRST generated
+        step's logits restricted to the "yes"/"no" answer tokens and softmaxed
+        over those two; the mass on "yes" is the support probability.  This
+        preserves the graded signal the GR10 reliability curve needs instead of
+        collapsing to a hard {1.0, 0.0} decision.
 
         Determinism: float32, greedy decoding (num_beams=1, do_sample=False),
-        fixed input format ensures bit-stable scores.
+        fixed input format and a single forward step ensure bit-stable scores.
         """
         import torch  # noqa: PLC0415 -- intentionally lazy
 
@@ -353,25 +362,40 @@ class MiniCheckEntailmentGate(BaseEntailmentGate):
             truncation=True,
             max_length=2048,
         )
-        # Greedy decoding; no sampling; float32 for determinism on MPS
+        # Greedy decoding; no sampling; float32 for determinism on MPS. We need
+        # the per-step logits to recover the token-level support probability, so
+        # request scores back from generate().
         with torch.no_grad():
             outputs = self._model.generate(
                 **inputs,
-                max_new_tokens=10,
+                max_new_tokens=1,
                 do_sample=False,
                 num_beams=1,
+                output_scores=True,
+                return_dict_in_generate=True,
             )
-        decoded = self._tokenizer.decode(outputs[0], skip_special_tokens=True).strip().lower()
-        # MiniCheck outputs "yes" (supported) or "no" (not supported).
-        # PLACEHOLDER: hard yes/no -> {1.0, 0.0} drops the support probability;
-        # production calibration (ss4.3, GR10) must read MiniCheck's token-level
-        # support probability instead of collapsing to binary here.
-        if decoded.startswith("yes"):
-            return 1.0
-        if decoded.startswith("no"):
-            return 0.0
-        # Fallback: unknown output -> conservative 0.0
-        return 0.0
+        # First generated step's logits over the full vocabulary.
+        first_step_logits = outputs.scores[0][0]
+        # Answer-token ids for "yes"/"no". add_special_tokens=False so we get the
+        # bare answer-word piece; each must be exactly one token so the logit
+        # index is unambiguous. A future tokenizer that splits "yes"/"no" into
+        # multiple pieces would silently score on the wrong sub-token without this
+        # guard.
+        yes_ids = self._tokenizer.encode("yes", add_special_tokens=False)
+        no_ids = self._tokenizer.encode("no", add_special_tokens=False)
+        if len(yes_ids) != 1 or len(no_ids) != 1:
+            raise ValueError(
+                f"MiniCheck tokenizer encoded 'yes' to {yes_ids} and 'no' to {no_ids}; "
+                "each must encode to exactly one token for unambiguous logit indexing. "
+                "This tokenizer is incompatible with the single-token scoring assumption."
+            )
+        yes_id = yes_ids[0]
+        no_id = no_ids[0]
+        # Softmax over just the two answer-token logits; mass on "yes" is the
+        # calibrated support probability.
+        pair = torch.stack([first_step_logits[yes_id], first_step_logits[no_id]])
+        probs = torch.softmax(pair.float(), dim=0)
+        return float(probs[0].item())
 
 
 # ---------------------------------------------------------------------------

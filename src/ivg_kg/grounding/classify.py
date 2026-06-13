@@ -239,6 +239,74 @@ class Classifier:
             node_ids = [edge.subject_id, object_node_id]
         return GroundingPath(edges=[path_edge], node_ids=node_ids)
 
+    # -- public enumeration helpers ---------------------------------------
+
+    def resolve_endpoints(self, linked_entities: list[LinkedEntity]) -> list[str]:
+        """Resolve linked entities to entity-node QIDs present in the snapshot.
+
+        Deduplicates while preserving the first-occurrence order. Literals and
+        nodes not in the graph are excluded. This is the canonical endpoint set
+        for multi-hop path search (GR9 I1).
+        """
+        endpoints: list[str] = []
+        seen: set[str] = set()
+        for ent in linked_entities:
+            if ent.id in seen:
+                continue
+            if self._node_kind.get(ent.id, "entity") == "entity" and ent.id in self._graph:
+                seen.add(ent.id)
+                endpoints.append(ent.id)
+        return endpoints
+
+    def accepted_multi_hop_paths(
+        self,
+        claim_text: str,
+        endpoints: list[str],
+        *,
+        tau: float | None = None,
+    ) -> list[tuple[float, list[str], GroundingPath]]:
+        """All distinct 2..k-hop paths between entity endpoints that the gate accepts.
+
+        Returns a list of (score, node_path, GroundingPath) for every path whose
+        serialized premise scores gate.entails(...) > tau.  Endpoints must be
+        entity-node QIDs (literals excluded as endpoints AND waypoints).
+        tau defaults to self._config.tau when not supplied.
+
+        The returned list is in deterministic order: endpoint pairs are sorted,
+        and within each pair all_simple_paths yield order is preserved (then the
+        caller's argmax + tuple tie-break selects the single best when needed).
+        """
+        effective_tau = self._config.tau if tau is None else tau
+        k_hops = self._config.k_hops
+        results: list[tuple[float, list[str], GroundingPath]] = []
+
+        nodes = sorted(endpoints)
+        for i, src in enumerate(nodes):
+            for tgt in nodes[i + 1 :]:
+                try:
+                    candidate_paths = nx.all_simple_paths(self._undirected, src, tgt, cutoff=k_hops)
+                except (nx.NetworkXError, nx.exception.NodeNotFound):
+                    continue
+
+                for node_path in candidate_paths:
+                    if len(node_path) < 3:  # need >= 2 hops (>= 3 nodes)
+                        continue
+                    intermediates = node_path[1:-1]
+                    if any(self._node_kind.get(n, "entity") == "literal" for n in intermediates):
+                        continue
+
+                    path_edges = self._path_to_edges(node_path)
+                    if path_edges is None:
+                        continue
+                    premise = _serialise_path(path_edges)
+                    score = self._gate.entails(premise, claim_text)
+                    if score > effective_tau:
+                        results.append(
+                            (score, list(node_path), GroundingPath(edges=path_edges, node_ids=list(node_path)))
+                        )
+
+        return results
+
     # -- cascade stages ---------------------------------------------------
 
     def _best_direct_triple(self, claim_text: str) -> tuple[float, KGEdge | None]:
@@ -313,49 +381,32 @@ class Classifier:
         tuple(node_path) lexicographically. This makes the chosen path
         independent of all_simple_paths yield order (which networkx does not
         guarantee to be stable across versions).
+
+        Delegates enumeration to accepted_multi_hop_paths (single source of truth),
+        then applies the argmax + tuple(node_path) tie-break to pick the single best.
         """
-        k_hops = self._config.k_hops
+        # accepted_multi_hop_paths already uses self._config.tau; all passing
+        # paths come back with their score; we then pick the argmax with the
+        # explicit lex tie-break so the return value is byte-for-byte unchanged.
+        accepted = self.accepted_multi_hop_paths(claim_text, endpoints)
+
         best_score = 0.0
         best_path: GroundingPath | None = None
         best_node_path: list[str] | None = None
 
-        # Endpoints are the linked-entity QIDs that are entity nodes in the
-        # snapshot, sorted for deterministic pair enumeration.
-        nodes = sorted(endpoints)
-        for i, src in enumerate(nodes):
-            for tgt in nodes[i + 1 :]:
-                try:
-                    candidate_paths = nx.all_simple_paths(self._undirected, src, tgt, cutoff=k_hops)
-                except (nx.NetworkXError, nx.exception.NodeNotFound):
-                    continue
-
-                for node_path in candidate_paths:
-                    if len(node_path) < 3:  # need >= 2 hops (>= 3 nodes)
-                        continue
-                    # Intermediate waypoints must be entity nodes (no literals).
-                    intermediates = node_path[1:-1]
-                    if any(self._node_kind.get(n, "entity") == "literal" for n in intermediates):
-                        continue
-
-                    path_edges = self._path_to_edges(node_path)
-                    if path_edges is None:
-                        continue
-                    premise = _serialise_path(path_edges)
-                    score = self._gate.entails(premise, claim_text)
-                    # Explicit tie-break: prefer the tuple(node_path)-lexicographically
-                    # smaller path so the result is independent of yield order.
-                    node_path_key = tuple(node_path)
-                    best_node_path_key = (
-                        tuple(best_node_path) if best_node_path is not None else None
-                    )
-                    if score > best_score or (
-                        score == best_score
-                        and best_node_path_key is not None
-                        and node_path_key < best_node_path_key
-                    ):
-                        best_score = score
-                        best_path = GroundingPath(edges=path_edges, node_ids=list(node_path))
-                        best_node_path = list(node_path)
+        for score, node_path, grounding_path in accepted:
+            node_path_key = tuple(node_path)
+            best_node_path_key = (
+                tuple(best_node_path) if best_node_path is not None else None
+            )
+            if score > best_score or (
+                score == best_score
+                and best_node_path_key is not None
+                and node_path_key < best_node_path_key
+            ):
+                best_score = score
+                best_path = grounding_path
+                best_node_path = node_path
 
         return best_score, best_path, best_node_path
 
@@ -475,14 +526,7 @@ class Classifier:
         # --- (3) Multi-hop path ---
         # Restrict endpoints to the claim's linked entities that are entity nodes
         # in the snapshot (literals excluded as endpoints). Dedup, preserve order.
-        endpoints: list[str] = []
-        seen_endpoints: set[str] = set()
-        for ent in linked_entities:
-            if ent.id in seen_endpoints:
-                continue
-            if self._node_kind.get(ent.id, "entity") == "entity" and ent.id in self._graph:
-                seen_endpoints.add(ent.id)
-                endpoints.append(ent.id)
+        endpoints = self.resolve_endpoints(linked_entities)
         # Fewer than 2 linked entity endpoints: no pair to connect, so skip the
         # multi-hop stage entirely and fall through to FABRICATED (GR9 I1).
         if len(endpoints) < 2:

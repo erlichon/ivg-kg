@@ -932,3 +932,101 @@ def test_empty_reference_fabricated():
     assert rec.entailment_score is None
     assert rec.grounding_path.edges == []
     assert rec.grounding_path.node_ids == []
+
+
+# ---------------------------------------------------------------------------
+# T5. accepted_multi_hop_paths single-source-of-truth: two distinct accepted
+# paths between the same endpoints are both returned, and classify still picks
+# the deterministic argmax one.
+# ---------------------------------------------------------------------------
+
+
+def test_accepted_multi_hop_paths_returns_all_accepted_and_classify_picks_argmax():
+    # Graph: Q10 -- Q20 -- Q11 (via Author X) AND Q10 -- Q21 -- Q11 (via Author Y).
+    # Gate scores path through Q20 higher than path through Q21 so the winner is
+    # unambiguous; accepted_multi_hop_paths must return BOTH (len==2) and classify
+    # must select the higher-scoring one.
+    nodes = [
+        KGNode(id="Q10", label="Book A"),
+        KGNode(id="Q11", label="Book B"),
+        KGNode(id="Q20", label="Author X"),
+        KGNode(id="Q21", label="Author Y"),
+    ]
+    edges = [
+        KGEdge(
+            subject_id="Q10",
+            property_id="P50",
+            property_label="written by",
+            object_id="Q20",
+            object_label="Author X",
+            value_type=ValueType.ITEM,
+        ),
+        KGEdge(
+            subject_id="Q11",
+            property_id="P50",
+            property_label="written by",
+            object_id="Q20",
+            object_label="Author X",
+            value_type=ValueType.ITEM,
+        ),
+        KGEdge(
+            subject_id="Q10",
+            property_id="P50",
+            property_label="written by",
+            object_id="Q21",
+            object_label="Author Y",
+            value_type=ValueType.ITEM,
+        ),
+        KGEdge(
+            subject_id="Q11",
+            property_id="P50",
+            property_label="written by",
+            object_id="Q21",
+            object_label="Author Y",
+            value_type=ValueType.ITEM,
+        ),
+    ]
+    ref = _ref(nodes, edges)
+    # Gate scores path through Author X at 0.85 (> tau 0.3), path through
+    # Author Y at 0.70 (> tau 0.3). No single-edge premise contains BOTH book
+    # labels so neither single hop scores above tau for the joint claim.
+    gate = _StubGate(
+        [
+            ("Author X Book B", 0.85),
+            ("Author X Book A", 0.85),
+            ("Author Y Book B", 0.70),
+            ("Author Y Book A", 0.70),
+        ]
+    )
+    canon = PropertyCanon(
+        alias_map={"P50": "P50", "written by": "P50"},
+        non_canonical_to_canonical={},
+    )
+    config = GroundingConfig(k_hops=2, tau=0.3)
+    clf = Classifier(ref, gate=gate, canon=canon, config=config)
+
+    endpoints = [
+        LinkedEntity(id="Q10", label="Book A", link_score=1.0),
+        LinkedEntity(id="Q11", label="Book B", link_score=1.0),
+    ]
+    endpoint_qids = clf.resolve_endpoints(endpoints)
+
+    # accepted_multi_hop_paths must return BOTH paths (single source of truth).
+    accepted = clf.accepted_multi_hop_paths(
+        "Book A and Book B share an author", endpoint_qids
+    )
+    assert len(accepted) == 2, (
+        f"Expected 2 accepted paths but got {len(accepted)}; "
+        "accepted_multi_hop_paths must enumerate ALL paths above tau"
+    )
+
+    # classify must select the higher-scoring path (through Author X, score 0.85).
+    rec = clf.classify(
+        "Book A and Book B share an author",
+        endpoints,
+        claim_id="c1",
+    )
+    assert rec.status == ClaimStatus.REASONED_SUPPORTABLE
+    assert rec.entailment_score == 0.85
+    # The winning path goes through Q20 (Author X).
+    assert "Q20" in rec.grounding_path.node_ids
