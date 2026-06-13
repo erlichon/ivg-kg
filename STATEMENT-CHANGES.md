@@ -676,3 +676,94 @@ framing were left untouched.
   selector) and #15 (rewritten to REMOVE-from-context / ADD-to-KG; verifier never ablated; offline
   aggregate quantifies RQ2, interactive tool is qualitative only). Dependency graph and waves
   untouched.
+
+---
+
+## Addendum (2026-06-12) — MMA4AI reframe: instrument-first, C1/C2/C3, honesty layer, novelty honesty, multimodal committed (APPLIED to statement)
+
+A high-stakes REFRAME + ADDITIONS to `project_statement.md` to converge it with `FOCUS.md`
+(consolidated 2026-06-12) and the two 2026-06-12 decision files (novelty fact-check;
+course-grounding of lectures 5-AI4MMA / 6-MMA4AI). This is a reframe, not a rewrite: the
+absence-induced-hallucination spine, the books `Q571` slice + sitelink band + content/structure
+non-redundancy, the generator(stochastic)/verifier(deterministic, different family) split, the two
+perturbation layers, the multi-mode analytics, three-way status + "Supportable" label, the §6
+validation controls, and the Pike/Yi/Sacha/Worring framing are all KEPT. No conflict found between
+FOCUS.md and the statement that required stopping. Nothing committed/staged.
+
+**Core framing shift (instrument-first / MMA4AI / "probing not prompting").**
+- **§1:** added the MMA4AI-instrument lead — "one main action: analyze", probes not prompts,
+  contribution is the instrument not an ML result, with the course-grounded grounds->classify->
+  attribute->repair sentence. Kept the absence-induced-hallucination problem and the modality
+  decomposition.
+- **§2 lead-in:** reframed the spine as the *scientific* phenomenon the instrument probes; named the
+  modality of missing evidence as the manipulated variable (multimodal = load-bearing).
+
+**Novelty honesty (§2 prior-work + §10 + refs).** Added a new lead bullet to the prior-work list:
+**ContextCite [13]** (causal context attribution via ablation) and **Jain & Wallace "Attention is
+not Explanation" [14]** (+ **Wallat et al. [15]**) as **closest prior art** — stated plainly that we
+do NOT invent causal evidence attribution nor the cited!=relied phenomenon; novelty is the
+**composition at KG-triple granularity** (the observational-vs-causal AGREEMENT taxonomy over KG
+facts, deterministic verifier, interactive VA, repair loop). KGR/CogMG/VISA/GraphEval/VeGraph
+differentiation (incl. CogMG repair-leverage) KEPT.
+
+**Contributions reframed to C1/C2/C3 (§4)** — verbatim new bullets:
+1. **C1 — the instrument.** An interactive MMA4AI visual-analytics instrument: grounding via a
+   deterministic calibrated verifier, multi-layer attribution + three-way status, the
+   Overview->Inspection->Repair loop (incl. repair loop + repair_leverage), wrapped in the honesty
+   layer; stands independent of any empirical finding.
+2. **C2 — the absence finding.** Controlled decomposition of absence-induced hallucination by
+   evidence modality (textual content / structural knowledge / image content = the manipulated
+   variable; multimodal load-bearing), per-slice distribution shifts, unconfounded within-image-slice
+   cross-modality contrast as a second step.
+3. **C3 — the agreement quadrant.** Observational(support-frequency)-vs-causal(absence-shift)
+   agreement taxonomy at KG-triple grain — load-bearing / redundant-scaffold / hidden-dependency /
+   inert — the narrowed reviewer-honest novelty; repair_leverage folded in as a measure within
+   C1/RQ3, CogMG differentiation preserved; C3 must not drive the schedule.
+
+**Requirements skeleton (§3).** Added the numbered R1/R2/R3 (Overview/Inspection/Repair) with the
+named audience "an analyst calibrating trust in an LLM's KG grounding"; RQ1/RQ2/RQ3 kept. Added the
+four-cell agreement quadrant explicitly into RQ2's agreement paragraph.
+
+**Honesty layer (§5 new point 9; §6).** Added: (a) two-tier data-agnostic trust (instrument-level
+published-accuracy + margin-to-tau for ANY KG; deployment-level gold-QA calibration for the loaded
+slice, degrading to instrument-level + "not calibrated to your KG" caveat + label-N affordance for
+BYO-KG); (b) curated gold QA set does double duty (calibrates verifier + anchors the RQ2 sweep);
+(c) "fabricated != false" overlay; (d) Provenance Card (faithful deterministic proof chain) beside
+the generator's CoT labelled "stated, not necessarily faithful"; (e) epistemic glyph grammar
+(observed / intervened / n=1).
+
+**Interface vocabulary (§6).** Adopted MMA4AI scores language (STATUS / support-frequency /
+repair_leverage / verifier-error as the instrument's "scores"); the deterministic verifier named the
+**Analysis VA-Agent** whose rationale is the Provenance Card; the sampled LLM the Generate/Analyze
+agent; Orienting+Directing (not Prescriptive) guidance posture licensed by L6 "guidance->bias";
+hue=STATUS kept; the **always-on Trust strip** named the highest-leverage UI point. Dropped the loose
+"Expert Module / Analysis agent" wording.
+
+**Evaluation (§8).** Added van Wijk K/C cost-benefit (analytic-quality via simulation) and an
+explicit North insight-based line alongside the existing analytic-distribution evidence; verifier
+calibration framed as instrument self-measurement. The image axis is now "validity-conditional"
+(gate routes the domain), not "gated" as in "maybe".
+
+**Scope bound.** Added "human-AI teaming WITHOUT RL strategy optimization" (§6 close) to pre-empt the
+"why no learning loop" question.
+
+**Multimodal = COMMITTED (hedging removed).** Title kept ("...in Multimodal Knowledge Graphs"). All
+"curtailable / image axis dropped / books-only with no core loss" hedging removed and replaced with
+committed-second-phase + artwork-or-taxa de-risk language at: §2 content-absence bullet, §5.1, §7
+perturbation-as-interface bullet, §10 image-axis-cost bullet (+ data-dependency bullet), §11 steps
+1 and 5, and §9 Implementation. The validity gate is reframed as a checkpoint that **routes
+artwork->taxa**, never one that abandons the modality; taxa range-maps "guarantee an image axis".
+Phase B (the *cross-modality contrast*, C3 upside) may still be curtailed first — clarified that this
+trims the unconfounded comparison, NOT the committed image axis (Phase A includes image-content).
+
+**References added/fixed.** Added and numbered: **[13] ContextCite (arXiv:2409.00729, NeurIPS 2024)**,
+**[14] Jain & Wallace "Attention is not Explanation" (NAACL 2019, arXiv:1902.10186)**, **[15] Wallat
+et al. "Correctness is not Faithfulness in RAG Attributions" (arXiv:2412.18004, ICTIR 2025)**,
+**[16] AbstentionBench (arXiv:2506.09038)**, **[17] TruthRL (arXiv:2509.25760)**, **[18] KGLens
+(arXiv:2312.11539)**, **[19] Mallen et al. PopQA (arXiv:2212.10511)**, **[20] MultiHal (ICLR 2026
+submission, OpenReview uDgDuVMpfW — possible eval dataset)**, **[21] ApresCoT (EDBT 2025 demo)**.
+**Fixed [9] Agrawal (arXiv:2512.00663):** existence confirmed; annotation corrected to a
+**four-quadrant reliability spectrum (NOT three-way)** and **no user study**; differentiation
+re-stated. **[7] kept flagged provisional** ("to add to knowledge base"; arXiv:2605.26362).
+
+**Not committed.** All changes left in the working tree; no git add/commit/push.
