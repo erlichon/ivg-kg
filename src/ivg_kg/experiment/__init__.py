@@ -12,6 +12,11 @@ load_gold_qa_set    -- load from a JSON file path and validate
 QuestionBankItem    -- a single fixed-bank question (SPEC §5 / EX1)
 QuestionBank        -- a validated collection of QuestionBankItems
 load_question_bank  -- load from a JSON file path and validate
+RunSet              -- all runs produced by one offline sweep (SPEC sec 4.8)
+run_sweep           -- GR11 offline precompute sweep harness
+sweep_seed          -- deterministic per-draw seed scheme
+default_perturbations_for -- books-spine condition -> perturbation mapping
+write_runset        -- write RunSet runs to data/runs/
 """
 
 from ivg_kg.experiment.gold_qa import GoldQAItem, GoldQASet, load_gold_qa_set
@@ -19,6 +24,13 @@ from ivg_kg.experiment.question_bank import (
     QuestionBank,
     QuestionBankItem,
     load_question_bank,
+)
+from ivg_kg.experiment.sweep import (
+    RunSet,
+    default_perturbations_for,
+    run_sweep,
+    sweep_seed,
+    write_runset,
 )
 
 __all__ = [
@@ -28,4 +40,9 @@ __all__ = [
     "QuestionBankItem",
     "load_gold_qa_set",
     "load_question_bank",
+    "RunSet",
+    "default_perturbations_for",
+    "run_sweep",
+    "sweep_seed",
+    "write_runset",
 ]

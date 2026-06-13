@@ -22,12 +22,13 @@ attribution metadata only and never alters a decision (Invariant #1).
 from __future__ import annotations
 
 import uuid
+from typing import NamedTuple
 
 from ivg_kg.data.reference import reference_id
 from ivg_kg.grounding.classify import Classifier
 from ivg_kg.grounding.entailment import make_entailment_gate
-from ivg_kg.grounding.extract import make_extractor
-from ivg_kg.grounding.link import PropertyCanon, make_entity_linker
+from ivg_kg.grounding.extract import BaseClaimExtractor, make_extractor
+from ivg_kg.grounding.link import BaseEntityLinker, PropertyCanon, make_entity_linker
 from ivg_kg.schema import (
     ClaimRecord,
     ClaimStatus,
@@ -47,6 +48,42 @@ from ivg_kg.schema import (
 # "DTP(NN)" (exact match -> 1.0), (b) rejects junk containment matches where
 # a short label is a substring of a long arbitrary surface span.
 MIN_HEAD_TAIL_LINK_SCORE: float = 0.5
+
+
+class GroundingComponents(NamedTuple):
+    """The five verifier-side pipeline components bound to one reference.
+
+    Built once per reference via ``build_components`` and reused across many
+    ``_ground_with_components`` calls (e.g. across the whole offline sweep).
+    The gate lives inside ``classifier``; ``canon`` is threaded for call-site
+    symmetry.
+    """
+
+    extractor: BaseClaimExtractor
+    linker: BaseEntityLinker
+    canon: PropertyCanon
+    classifier: Classifier
+
+
+def build_components(reference: GradingReference, config: GroundingConfig) -> GroundingComponents:
+    """Build the verifier-side components bound to one reference.
+
+    Constructs the extractor, entity linker, property canon, entailment gate,
+    and classifier exactly once.  Reuse across many ``_ground_with_components``
+    calls for the same reference (e.g. the offline sweep) to avoid rebuilding
+    the NetworkX graph and reloading PropertyCanon per draw.
+    """
+    extractor = make_extractor(config.extractor)
+    linker = make_entity_linker(config.linker, reference.snapshot)
+    canon = PropertyCanon.load()
+    gate = make_entailment_gate(config)
+    classifier = Classifier(reference, gate=gate, canon=canon, config=config)
+    return GroundingComponents(
+        extractor=extractor,
+        linker=linker,
+        canon=canon,
+        classifier=classifier,
+    )
 
 
 def ground_response(
@@ -85,12 +122,64 @@ def ground_response(
     # Build the pipeline components ONCE per call (not per claim): the linker
     # index, canon table, entailment gate, and classifier graph are all reused
     # across every extracted claim.
-    extractor = make_extractor(config.extractor)
-    linker = make_entity_linker(config.linker, reference.snapshot)
-    canon = PropertyCanon.load()
-    gate = make_entailment_gate(config)
-    classifier = Classifier(reference, gate=gate, canon=canon, config=config)
+    components = build_components(reference, config)
+    return _ground_with_components(
+        question,
+        answer_text,
+        reference,
+        active_perturbations=active_perturbations,
+        components=components,
+    )
 
+
+def _ground_with_components(
+    question: str,
+    answer_text: str,
+    reference: GradingReference,
+    *,
+    active_perturbations: list[str],
+    components: GroundingComponents,
+) -> GroundingRun:
+    """Ground an answer reusing pre-built pipeline components.
+
+    This is the per-claim wiring body shared by ``ground_response`` and the
+    offline sweep harness (GR11). ``ground_response`` builds the components via
+    ``build_components`` and delegates here; the sweep builds them ONCE per
+    reference (the reference is immutable across the whole sweep) and the
+    extractor once, then calls this in the inner loop -- avoiding a rebuild of
+    the NetworkX graph and a reload of PropertyCanon on every draw.
+
+    ``components.canon`` is carried for call-site symmetry; it is not
+    re-consulted here because the classifier already holds it. Behavior is
+    byte-identical to the inlined body that previously lived in
+    ``ground_response`` -- grading is ALWAYS against the full reference;
+    ``active_perturbations`` is attribution metadata only and never alters a
+    decision (Invariant #1).
+
+    Parameters
+    ----------
+    question:
+        The question posed to the generative model.
+    answer_text:
+        The model's raw answer text to be grounded.
+    reference:
+        The immutable full grading reference (used here only for its
+        snapshot.slice and stable reference id; grading uses
+        ``components.classifier``, which was built against this same reference).
+    active_perturbations:
+        Ordered perturbation entry ids active in this run (attribution only).
+    components:
+        Pre-built pipeline components (extractor, linker, canon, classifier).
+
+    Returns
+    -------
+    GroundingRun
+        A fully populated grounding run record (run_id is a fresh uuid4; the
+        sweep overwrites it with a deterministic id downstream).
+    """
+    extractor = components.extractor
+    linker = components.linker
+    classifier = components.classifier
     extracted = extractor.extract(answer_text)
     claims: list[ClaimRecord] = []
     for i, claim in enumerate(extracted):

@@ -72,12 +72,18 @@ class Condition(StrEnum):
 
     Each run's answer is generated from the (possibly ablated) context for this
     condition; the diagnostics aggregate the N draws across conditions (§4.8).
+
+    FULL_NO_EDIT_RERUN is a synthetic re-run of the FULL question with NO edit,
+    used by EX3 to net out generator variance from repair_leverage (SPEC-text
+    sec 4.6 / 4.8). Such a run carries baseline_run_id pointing at the original
+    FULL run it is matched to; grading is still against the full reference.
     """
 
     FULL = "full"
     KNOWLEDGE_ABSENT = "knowledge-absent"
     CONTENT_ABSENT = "content-absent"
     IMAGE_ABSENT = "image-absent"  # image axis only; unused in the books spine
+    FULL_NO_EDIT_RERUN = "full-no-edit-rerun"  # synthetic no-repair baseline (EX3 variance net-out)
 
 
 class EpistemicLevel(StrEnum):
