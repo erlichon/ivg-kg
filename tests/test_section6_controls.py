@@ -575,19 +575,31 @@ def test_control_grade_against_reference_classification_half_ts2() -> None:  # p
 
 
 def test_control_grade_against_reference_backend_stub_wired() -> None:
-    """§6 scaffold: P0 backend raises NotImplementedError (stub is wired).
+    """§6 scaffold: real grounding backend returns a valid GroundingRun.
 
-    Documents that ground_response() is intentionally a P0 stub.
-    TS2 closes this scaffold by replacing the stub body with the real GR9
-    implementation and classifying the withheld-evidence claim against KG-full.
+    Updated from the P0 NotImplementedError stub by Task #1a.
+    The slice backend classifies 'The Test Novel was written by Test Author.'
+    against the KG-full reference and must produce a non-empty GroundingRun.
     """
     reference = _build_full_reference()
     config = GroundingConfig()
-    with pytest.raises(NotImplementedError):
-        ground_response(
-            question="What is The Test Novel?",
-            answer_text="The Test Novel was written by Test Author.",
-            reference=reference,
-            active_perturbations=[],
-            config=config,
-        )
+    run = ground_response(
+        question="What is The Test Novel?",
+        answer_text="The Test Novel was written by Test Author.",
+        reference=reference,
+        active_perturbations=[],
+        config=config,
+    )
+    assert isinstance(run, GroundingRun), (
+        f"Expected GroundingRun, got {type(run)}"
+    )
+    assert len(run.claims) > 0, "GroundingRun must have at least one claim"
+    # The claim about authorship should be grounded (RETRIEVED or REASONED_SUPPORTABLE)
+    # since the author triple IS in the reference.
+    grounded = [
+        c for c in run.claims
+        if c.status in (ClaimStatus.RETRIEVED, ClaimStatus.REASONED_SUPPORTABLE)
+    ]
+    assert grounded, (
+        "Expected at least one grounded claim; author triple is in the reference"
+    )
