@@ -155,6 +155,11 @@ def _derive_subgraph_snapshot(run: GroundingRun) -> KGSnapshot:
             edge_key = (pe.subject_id, pe.property_id, obj_id)
             if edge_key not in seen_edges:
                 seen_edges.add(edge_key)
+                # NOTE: literal edges (object_id=None) produce support_frequency key
+                # "<subj>|<prop>|None" but a cyto edge id ending in "lit:<type>:<label>",
+                # so literal support edges are NOT brushed by the multi-run
+                # support_frequency stylesheet; fix belongs in the diagnostics/stylesheet
+                # key convention, not here.
                 edges.append(
                     KGEdge(
                         subject_id=pe.subject_id,

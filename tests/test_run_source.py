@@ -239,16 +239,20 @@ def test_real_mode_answer_diagnostics_uses_loaded_run(monkeypatch, tmp_path):
 
 def test_real_mode_answer_diagnostics_aggregates_multiple_runs(monkeypatch, tmp_path):
     """REAL mode: when multiple slice runs share a slice, get_answer_diagnostics aggregates them."""
-    run = mock_grounding_run()
+    base = mock_grounding_run()
+    # _load_slice_runs deduplicates by path.stem == primary_run.run_id, which
+    # assumes file names match internal run_ids (the emit_slice_runs.py convention).
+    # Honour that convention here so all 4 runs are counted exactly once.
     run_id = "test-multi-agg"
+    primary = base.model_copy(update={"run_id": run_id})
     monkeypatch.setenv("IVG_KG_RUN_ID", run_id)
 
-    # Write 3 runs with the same slice
+    # Write the primary run and 3 additional runs, all with slice="books".
+    _write_run(tmp_path / f"{run_id}.json", primary)
     for i in range(3):
-        r = run.model_copy(update={"run_id": f"test-run-{i}"})
-        _write_run(tmp_path / f"test-run-{i}.json", r)
-    # Also write the primary run
-    _write_run(tmp_path / f"{run_id}.json", run)
+        rid_i = f"test-run-{i}"
+        r = base.model_copy(update={"run_id": rid_i})
+        _write_run(tmp_path / f"{rid_i}.json", r)
 
     import importlib
 
@@ -257,8 +261,10 @@ def test_real_mode_answer_diagnostics_aggregates_multiple_runs(monkeypatch, tmp_
     monkeypatch.setattr(rs, "RUNS_DIR", tmp_path)
 
     result = rs.get_answer_diagnostics(10)
-    # All 4 runs share slice="books" and should be aggregated
-    assert result.n_runs >= 1  # at minimum loads the single loaded run
+    # All 4 runs share slice="books" and must all be aggregated.
+    # Asserting == 4 ensures multi-file aggregation is actually exercised;
+    # >= 1 would pass even if _load_slice_runs returned only the primary run.
+    assert result.n_runs == 4
 
 
 # ---------------------------------------------------------------------------
