@@ -126,21 +126,19 @@ def test_lexical_value_sensitive_omitted_value_scores_zero():
 # ---------------------------------------------------------------------------
 
 def test_lexical_gate_is_asymmetric():
-    """Swapping premise and hypothesis CAN produce different scores (asymmetric)."""
+    """Swapping premise and hypothesis produces a genuine direction split."""
     from ivg_kg.grounding.entailment import LexicalEntailmentGate
     gate = LexicalEntailmentGate()
-    # premise has date 1944; hypothesis lacks it -> value check fires on hypothesis direction
+    # premise has date 1944; hypothesis lacks it -> value check fires only on the
+    # reverse direction (where 1944 appears in the hypothesis).
+    # forward: hyp has no value assertion -> positive Jaccard score.
+    # reverse: hyp has 1944 which is absent from "first performance" -> value block -> 0.0.
     premise = "first performance 1944 St Louis"
     hypothesis = "first performance"
-    # forward: hyp tokens are a subset of premise tokens, no value assertion -> positive
-    # reverse (premise->hyp swapped): new "premise" has no 1944, new "hyp" has 1944 ->
-    #   the VALUE check fires, scores 0.
     fwd = gate.entails(premise, hypothesis)
     rev = gate.entails(hypothesis, premise)
-    # At minimum they must not both be zero in the same direction (one direction should pass)
-    # The key invariant is that at least one direction differs from the other
-    assert fwd != rev or (fwd == 0.0 and rev == 0.0), (
-        "asymmetry test: fwd and rev should differ when one direction has a value assertion"
+    assert (fwd > 0.0) != (rev > 0.0), (
+        f"expected a genuine direction split: fwd={fwd}, rev={rev}"
     )
 
 

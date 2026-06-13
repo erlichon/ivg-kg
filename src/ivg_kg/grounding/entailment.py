@@ -65,7 +65,10 @@ class BaseEntailmentGate(ABC):
     """
 
     def __init__(self) -> None:
-        # Per-instance cache: (premise, hypothesis) -> float
+        # Per-instance cache: (premise, hypothesis) -> float.
+        # Unbounded by design -- one gate instance per sweep is fine; revisit if
+        # a single instance spans the whole corpus.  Not thread-safe (fine for the
+        # single-threaded deterministic pipeline).
         self._cache: dict[tuple[str, str], float] = {}
 
     def entails(self, premise: str, hypothesis: str) -> float:
@@ -158,6 +161,9 @@ def _jaccard_with_value_guard(
                 and not any(el in v for el in entity_labels if len(el) > 3)
             }
         if h_vals:
+            # Slice-grade lexical heuristic: over-fires on capitalised non-value phrases
+            # and under-fires via loose substring matching when entity_labels is None.
+            # Model gates (GR7/GR10) supersede this check in the full cascade.
             p_vals = _extract_values(premise)
             premise_lower = premise.lower()
             for v in h_vals:
@@ -208,23 +214,36 @@ class LexicalEntailmentGate(BaseEntailmentGate):
 
 
 def _load_deberta_model(model_id: str) -> Any:  # pragma: no cover
-    """Lazy-load DeBERTa NLI pipeline.  Only called on first entails() invocation."""
+    """Lazy-load DeBERTa NLI pipeline.  Only called on first entails() invocation.
+
+    Pinned to float32 for bit-stable determinism (SPEC ss4.3, Invariants #8/#14).
+    device_map is omitted so the pipeline runs on CPU/MPS in the device's native
+    float32 mode; bit-stability holds per-device with a fixed model state.
+    """
+    import torch  # noqa: PLC0415 -- intentionally lazy
     import transformers  # noqa: PLC0415 -- intentionally lazy
-    return transformers.pipeline(
+    pipeline = transformers.pipeline(
         "zero-shot-classification",
         model=model_id,
-        device_map="auto",
-        torch_dtype="auto",
+        torch_dtype=torch.float32,
     )
+    pipeline.model.eval()
+    return pipeline
 
 
 def _load_minicheck_model(model_id: str) -> Any:  # pragma: no cover
-    """Lazy-load MiniCheck scorer.  Only called on first entails() invocation."""
+    """Lazy-load MiniCheck scorer.  Only called on first entails() invocation.
+
+    Pinned to float32 for bit-stable determinism (SPEC ss4.3, Invariants #8/#14).
+    .eval() disables dropout/batch-norm stochasticity for the calibration path.
+    """
     # MiniCheck uses the transformers AutoModelForSeq2SeqLM interface.
     # Import is deferred to keep the module importable without transformers.
+    import torch  # noqa: PLC0415 -- intentionally lazy
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer  # noqa: PLC0415
     tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_id, torch_dtype=torch.float32)
+    model.eval()
     return tokenizer, model
 
 
@@ -343,7 +362,10 @@ class MiniCheckEntailmentGate(BaseEntailmentGate):
                 num_beams=1,
             )
         decoded = self._tokenizer.decode(outputs[0], skip_special_tokens=True).strip().lower()
-        # MiniCheck outputs "yes" (supported) or "no" (not supported)
+        # MiniCheck outputs "yes" (supported) or "no" (not supported).
+        # PLACEHOLDER: hard yes/no -> {1.0, 0.0} drops the support probability;
+        # production calibration (ss4.3, GR10) must read MiniCheck's token-level
+        # support probability instead of collapsing to binary here.
         if decoded.startswith("yes"):
             return 1.0
         if decoded.startswith("no"):
