@@ -41,7 +41,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, Field  # noqa: F401
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Enums

@@ -230,6 +230,22 @@ class TestGoldQASet:
         with pytest.raises(ValueError, match="duplicate"):
             gs.assert_complete()
 
+    def test_assert_complete_fails_adversarial_without_fabricated_outcome(self) -> None:
+        # adversarial_negative=True but expected outcome is RETRIEVED, not FABRICATED.
+        # assert_complete() must reject this; it silently defeats the section-6 control.
+        items = [
+            _make_gold_item("gq-001", fold=GoldFold.CALIBRATION),
+            _make_gold_item(
+                "gq-002",
+                adversarial=True,
+                fold=GoldFold.SWEEP,
+                expected_status=ClaimStatus.RETRIEVED,  # wrong: must be FABRICATED
+            ),
+        ]
+        gs = GoldQASet(set_id="x", slice_id="books-p0-v1", items=items)
+        with pytest.raises(ValueError, match="FABRICATED"):
+            gs.assert_complete()
+
     def test_json_round_trip(self) -> None:
         gs = _make_gold_set()
         serialized = gs.to_json()

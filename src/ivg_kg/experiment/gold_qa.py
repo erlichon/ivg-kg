@@ -194,8 +194,16 @@ class GoldQASet(BaseModel):
 
         if not any(it.adversarial_negative for it in self.items):
             raise ValueError(
-                "gold set has no adversarial value-swapped negatives (§6 control)"
+                "gold set has no adversarial value-swapped negatives (section-6 control)"
             )
+
+        for it in self.items:
+            if it.adversarial_negative and not any(
+                oc.expected_status == ClaimStatus.FABRICATED for oc in it.expected_outcomes
+            ):
+                raise ValueError(
+                    f"adversarial item {it.item_id!r} has no FABRICATED expected outcome"
+                )
 
     # ------------------------------------------------------------------
     # JSON I/O
