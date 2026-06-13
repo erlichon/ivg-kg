@@ -60,3 +60,20 @@ DEBERTA_NLI_MODEL_ID: str = "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-
 
 # post-M-BOOKS (gated image axis) — not used in P0
 VLM_MODEL_ID: str = "Qwen/Qwen2.5-VL-3B-Instruct"
+
+# ---------------------------------------------------------------------------
+# AI client selection (SPEC-text SS4.3, GR1)
+# Controls which BaseAIClient implementation is returned by make_client().
+# Valid values: "local", "ollama", "cloud".
+# ---------------------------------------------------------------------------
+
+# Backend used by get_default_client() and the grounding pipeline (GR4+).
+DEFAULT_CLIENT_BACKEND: str = "local"
+
+# Ollama server config (used by OllamaClient).
+OLLAMA_BASE_URL: str = "http://localhost:11434"
+OLLAMA_MODEL_ID: str = "llama3.2"
+
+# Generation sampling parameters (Invariant #14: stochastic generator, seeded).
+# Callers override per-draw; these are the defaults exposed on generate_answer().
+DEFAULT_GENERATION_TEMPERATURE: float = 0.7
