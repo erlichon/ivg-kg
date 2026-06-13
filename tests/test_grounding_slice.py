@@ -30,7 +30,10 @@ from ivg_kg.schema import (
 # ---------------------------------------------------------------------------
 
 _SNAPSHOT_DIR = Path(__file__).parent.parent / "data" / "frozen" / "books" / "books-p0-v1"
-_DEFAULT_CONFIG = GroundingConfig(k_hops=2, tau=0.3)
+# entailment="lexical": the OFFLINE deterministic gate (model-free, no torch).
+# The real GR9 ground_response honours config.entailment; the default "minicheck"
+# needs torch, which is absent in CI, so these offline tests pin the lexical gate.
+_DEFAULT_CONFIG = GroundingConfig(k_hops=2, tau=0.3, entailment="lexical")
 
 
 def _load_snapshot():
@@ -429,3 +432,65 @@ def test_active_perturbations_recorded_on_claims():
         assert c.active_perturbations == perturbs, (
             "active_perturbations must be recorded on claims as-is"
         )
+
+
+# ---------------------------------------------------------------------------
+# I-1. End-to-end ground_response test: Pelevin multi-hop via real pipeline
+# ---------------------------------------------------------------------------
+
+def test_ground_response_pelevin_shared_author_multi_hop():
+    """ground_response (not run_cascade) on the Pelevin shared-author reference must
+    resolve the shared-author claim as REASONED_SUPPORTABLE / MULTI_HOP_PATH.
+
+    This test exercises the full extract -> link(head/tail + link_text merge) ->
+    classify path end-to-end, including the MIN_HEAD_TAIL_LINK_SCORE guard (I-2)
+    introduced in backend.py.  It is distinct from the emit script and from
+    run_cascade tests: it calls ground_response directly with the same config and
+    canned answer used by emit_slice_runs.py (run 2) so that the wiring is
+    verified in isolation from the generator.
+
+    Config matches emit_slice_runs._CONFIG: tau=0.4 forces the single-author
+    edge to fail the lexical gate (score ~0.333 < tau) while the 2-hop path
+    passes (score ~0.500 >= tau), yielding REASONED_SUPPORTABLE.
+    """
+    pelevin_config = GroundingConfig(
+        k_hops=2,
+        tau=0.4,
+        entailment="lexical",
+        linker="label_alias",
+        extractor="rule_based",
+    )
+    snapshot = _load_snapshot()
+    ref = _make_pelevin_ref(snapshot)
+    # Canned answer: canonical titles "Blue Lantern" and "DTP(NN)" so both
+    # endpoints link (exact or near-exact label match -> score >= MIN_HEAD_TAIL_LINK_SCORE).
+    answer = (
+        "Blue Lantern and DTP(NN) were written by Victor Pelevin. "
+        "DTP(NN) is a novel by Victor Pelevin published in 2003 by Eksmo. "
+        "Blue Lantern was published by HarperCollins in New York."
+    )
+    run = ground_response(
+        "Tell me about Pelevin books.",
+        answer,
+        ref,
+        active_perturbations=["pert-text-q105485274"],
+        config=pelevin_config,
+    )
+    assert isinstance(run, GroundingRun)
+    # First claim must be REASONED_SUPPORTABLE via MULTI_HOP_PATH
+    assert len(run.claims) >= 1
+    c1 = run.claims[0]
+    assert c1.status == ClaimStatus.REASONED_SUPPORTABLE, (
+        f"Expected REASONED_SUPPORTABLE for shared-author claim, got {c1.status}"
+    )
+    assert c1.support_source == SupportSource.MULTI_HOP_PATH, (
+        f"Expected MULTI_HOP_PATH, got {c1.support_source}"
+    )
+    # Victor Pelevin (Q246722) must be an intermediate node on the path
+    assert "Q246722" in c1.grounding_path.node_ids, (
+        "Victor Pelevin (Q246722) must be an intermediate node in the 2-hop path"
+    )
+    # Path must have >= 2 edges
+    assert len(c1.grounding_path.edges) >= 2, (
+        f"Expected >= 2 path edges, got {len(c1.grounding_path.edges)}"
+    )

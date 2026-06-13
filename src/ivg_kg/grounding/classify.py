@@ -36,7 +36,8 @@ spurious_path resolution (SPEC-text 4.8 + ClaimRecord docstring):
 
 Determinism (Invariants #8/#14): identical inputs -> identical ClaimRecord. The
 gate's determinism is provided. Edge/label/path iteration follows snapshot order;
-node pairs are taken in sorted entity-node order. Multi-hop path selection picks
+multi-hop endpoint pairs are restricted to the claim's linked entities (GR9 I1)
+and taken in sorted order. Multi-hop path selection picks
 the max-score path with an explicit tuple(node_path) lexicographic tie-break, so
 the chosen path is independent of all_simple_paths yield order (which networkx
 does not guarantee across versions). No randomness / time / network / pickle.
@@ -163,12 +164,6 @@ class Classifier:
             n: d.get("kind", "entity") for n, d in self._graph.nodes(data=True)
         }
         self._degree: dict[str, int] = dict(self._undirected.degree())
-
-        # Entity nodes only (literals excluded as endpoints AND waypoints),
-        # sorted for deterministic pair enumeration.
-        self._entity_nodes: list[str] = sorted(
-            n for n, k in self._node_kind.items() if k == "entity"
-        )
 
     # -- node-label lookup ------------------------------------------------
 
@@ -298,13 +293,20 @@ class Classifier:
         return path_edges
 
     def _best_multi_hop(
-        self, claim_text: str
+        self, claim_text: str, endpoints: list[str]
     ) -> tuple[float, GroundingPath | None, list[str] | None]:
-        """Max-entailment 2..k-hop path over entity-node pairs (literals excluded).
+        """Max-entailment 2..k-hop path between the claim's linked ENDPOINTS.
 
-        Returns (best_score, best_path, best_node_path). Endpoints and waypoints
-        are entity nodes only. Enumeration order is deterministic: entity nodes
-        are pre-sorted and pairs are taken in sorted order.
+        Returns (best_score, best_path, best_node_path). Endpoints are the QIDs
+        of the claim's linked entities (intersected with entity nodes; literals
+        are excluded as endpoints AND waypoints). Waypoints are unrestricted
+        entity nodes. Only paths whose BOTH ends are linked endpoints are
+        enumerated -- a path between entities the claim never mentions can never
+        win (GR9 I1: correctness + avoids the combinatorial all-pairs blow-up on
+        the real slice).
+
+        Enumeration order is deterministic: the candidate endpoints are pre-sorted
+        and pairs are taken in sorted order.
 
         Tie-breaking is EXPLICIT and version-independent: when two paths yield
         the same entailment score, the winner is determined by comparing
@@ -317,7 +319,9 @@ class Classifier:
         best_path: GroundingPath | None = None
         best_node_path: list[str] | None = None
 
-        nodes = self._entity_nodes
+        # Endpoints are the linked-entity QIDs that are entity nodes in the
+        # snapshot, sorted for deterministic pair enumeration.
+        nodes = sorted(endpoints)
         for i, src in enumerate(nodes):
             for tgt in nodes[i + 1 :]:
                 try:
@@ -469,7 +473,22 @@ class Classifier:
             )
 
         # --- (3) Multi-hop path ---
-        mh_score, mh_path, mh_node_path = self._best_multi_hop(claim_text)
+        # Restrict endpoints to the claim's linked entities that are entity nodes
+        # in the snapshot (literals excluded as endpoints). Dedup, preserve order.
+        endpoints: list[str] = []
+        seen_endpoints: set[str] = set()
+        for ent in linked_entities:
+            if ent.id in seen_endpoints:
+                continue
+            if self._node_kind.get(ent.id, "entity") == "entity" and ent.id in self._graph:
+                seen_endpoints.add(ent.id)
+                endpoints.append(ent.id)
+        # Fewer than 2 linked entity endpoints: no pair to connect, so skip the
+        # multi-hop stage entirely and fall through to FABRICATED (GR9 I1).
+        if len(endpoints) < 2:
+            mh_score, mh_path, mh_node_path = 0.0, None, None
+        else:
+            mh_score, mh_path, mh_node_path = self._best_multi_hop(claim_text, endpoints)
         if mh_score > tau and mh_path is not None and mh_node_path is not None:
             spurious, reason = self._detect_spurious(
                 mh_path, mh_node_path, mh_score, relation_surface, object_surface

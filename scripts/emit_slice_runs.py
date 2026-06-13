@@ -1,21 +1,31 @@
-"""SLICE component (#1a) -- deepened/replaced by GR9.
+"""Emit the 3 committed books example runs (GR9 -- real pipeline).
 
-Deterministic generator for the 3 hand-picked books slice examples.
+Deterministic generator for the 3 hand-picked books examples that the app
+renders. The answers are CANNED (there is no generator call here); each is
+grounded by the REAL verifier pipeline behind ground_response (GR9):
 
-Answers are CANNED (there is no generator call here).  Each GradingReference
-is built from the frozen books-p0-v1 snapshot plus hand-authored ContentLabels.
-Running this script twice produces byte-identical output files (deterministic).
+    extract  (GR5)  rule-based -> structured (head, relation, tail) claims
+    link     (GR6)  label/alias index -> claim entities resolved to KG QIDs
+    classify (GR8)  three-way cascade over the FULL reference + entailment gate
+
+Each GradingReference is built from the frozen books-p0-v1 snapshot plus
+hand-authored ContentLabels. The whole offline path (lexical gate, rule-based
+extractor, label-alias linker) is deterministic, so running this script twice
+produces byte-identical output files.
 
 Usage:
     uv run python scripts/emit_slice_runs.py
 
-Writes data/runs/<run_id>.json for each of the 3 examples.
-The data/runs/ directory is gitignored (expected).
+Writes data/runs/<run_id>.json for each of the 3 examples. These files are
+TRACKED fixtures (a gitignore negation keeps data/runs/slice-*.json in the repo).
 
-Example statuses exercised across the 3 runs:
-  - run_slice_01 (The Glass Menagerie):   RETRIEVED/DIRECT_TRIPLE, RETRIEVED/TEXT_CONTENT, FABRICATED
-  - run_slice_02 (Pelevin books):         REASONED_SUPPORTABLE/MULTI_HOP_PATH, RETRIEVED/TEXT_CONTENT, FABRICATED
-  - run_slice_03 (Principles of Econ):   RETRIEVED/DIRECT_TRIPLE, RETRIEVED/TEXT_CONTENT, FABRICATED
+Statuses produced across the 3 runs (verified against the real pipeline):
+  - slice-01 (The Glass Menagerie):    RETRIEVED/DIRECT_TRIPLE, RETRIEVED/TEXT_CONTENT, FABRICATED
+  - slice-02 (Pelevin books):          REASONED_SUPPORTABLE/MULTI_HOP_PATH, RETRIEVED/TEXT_CONTENT, FABRICATED
+  - slice-03 (Principles of Economics): RETRIEVED/DIRECT_TRIPLE, RETRIEVED/TEXT_CONTENT, FABRICATED
+
+Together the 3 runs exercise all three ClaimStatus values (the app demo and
+Playwright depend on this variety).
 """
 from __future__ import annotations
 
@@ -36,8 +46,30 @@ _RUN_IDS = [
 _SNAPSHOT_DIR = Path(__file__).parent.parent / "data" / "frozen" / "books" / "books-p0-v1"
 _RUNS_DIR = Path(__file__).parent.parent / "data" / "runs"
 
-# Shared config for all 3 slice examples
-_CONFIG = GroundingConfig(k_hops=2, tau=0.3)
+# Shared config for all 3 slice examples.
+# entailment="lexical" is the OFFLINE deterministic gate (model-free, no torch,
+# no download) so the committed runs are CI-safe and byte-stable. The default
+# "minicheck" gate needs torch and must NOT be used for the committed fixtures.
+#
+# tau=0.4 (raised from the slice's 0.3): an AUTHORED-INPUT adjustment made for
+# GR9 variety, NOT a classifier change. Under the real lexical gate, the Pelevin
+# joint claim (run 2, c1) scores 0.333 against a SINGLE author edge but 0.500 on
+# the 2-hop shared-author path. With the cascade's first-match-wins order, a tau
+# below 0.333 would resolve c1 as RETRIEVED/DIRECT_TRIPLE and the demo would lose
+# its only REASONED_SUPPORTABLE. tau=0.4 sits in (0.333, 0.500): the single edge
+# is rejected, the 2-hop path passes, and every other intended status is
+# unaffected (the RETRIEVED claims score 0.71-1.00 and the FABRICATED claims
+# score 0.0). See the run-2 comment for the paired phrasing adjustment.
+# NOTE: 0.4 is calibrated to the LEXICAL gate's exact scores for these demo
+# fixtures; the model-gate sweep (GR11) selects its own tau independently and
+# must NOT inherit 0.4.
+_CONFIG = GroundingConfig(
+    k_hops=2,
+    tau=0.4,
+    entailment="lexical",
+    linker="label_alias",
+    extractor="rule_based",
+)
 
 
 def build_slice_examples() -> list[GroundingRun]:
@@ -61,7 +93,7 @@ def build_slice_examples() -> list[GroundingRun]:
             ),
         ]),
     )
-    # Canned answer -- no generator call in this slice.
+    # Canned answer (no generator call); grounded by the real GR9 pipeline.
     answer1 = (
         "Tennessee Williams wrote The Glass Menagerie. "
         "The Glass Menagerie is set in a small apartment during the Great Depression. "
@@ -97,11 +129,24 @@ def build_slice_examples() -> list[GroundingRun]:
             ),
         ]),
     )
-    # c1: REASONED_SUPPORTABLE -- 2-hop path via shared author Victor Pelevin.
+    # c1: REASONED_SUPPORTABLE/MULTI_HOP_PATH -- 2-hop shared-author path
+    #     Blue Lantern --[author]--> Victor Pelevin <--[author]-- DTP(NN).
     # c2: RETRIEVED/TEXT_CONTENT -- content label directly matches.
     # c3: FABRICATED -- wrong publisher (HarperCollins) and location (New York).
+    #
+    # AUTHORED-INPUT adjustment (GR9): the slice's c1 read "Blue Lantern and DTP
+    # were both written by Pelevin." Under the real rule-based extractor +
+    # label-alias linker that phrasing fails the demo two ways: the bare title
+    # "DTP" does not link to the canonical node "DTP(NN)", so only ONE endpoint
+    # resolves and the multi-hop stage is skipped; and the cue "were" captures the
+    # tail "both written by Pelevin", tripping the value-absent spurious detector.
+    # The phrasing below uses both canonical titles (so both endpoints link) and
+    # the cue "were written by" (so the tail is just "Victor Pelevin", which IS on
+    # the path premise) -- yielding a clean, non-spurious REASONED_SUPPORTABLE.
+    # Paired with tau=0.4 (see _CONFIG) so the single author edge does not pre-empt
+    # the 2-hop path.
     answer2 = (
-        "Blue Lantern and DTP were both written by Pelevin. "
+        "Blue Lantern and DTP(NN) were written by Victor Pelevin. "
         "DTP(NN) is a novel by Victor Pelevin published in 2003 by Eksmo. "
         "Blue Lantern was published by HarperCollins in New York."
     )

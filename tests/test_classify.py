@@ -349,7 +349,12 @@ def test_literal_node_excluded_as_waypoint():
     clf = Classifier(ref, gate=gate, canon=_inmem_canon(), config=_LEXICAL_CONFIG)
     rec = clf.classify(
         "Beloved and Sula were both published in 1987",
-        [],
+        # Both book endpoints linked: the only connection between them is via a
+        # literal waypoint, which is excluded, so no entity path exists.
+        [
+            LinkedEntity(id="Q10", label="Beloved", link_score=1.0),
+            LinkedEntity(id="Q11", label="Sula", link_score=1.0),
+        ],
         claim_id="c1",
     )
     # No multi-hop entity path -> falls through. Direct edges may match the
@@ -455,7 +460,10 @@ def test_spurious_relation_illegitimate():
     clf = Classifier(ref, gate=gate, canon=canon, config=_LEXICAL_CONFIG)
     rec = clf.classify(
         "Beloved and Sula share the genre Toni Morrison",
-        [],
+        [
+            LinkedEntity(id="Q10", label="Beloved", link_score=1.0),
+            LinkedEntity(id="Q11", label="Sula", link_score=1.0),
+        ],
         claim_id="c1",
         relation_surface="genre",
         object_surface="Toni Morrison",
@@ -506,7 +514,10 @@ def test_spurious_value_absent():
     clf = Classifier(ref, gate=gate, canon=canon, config=_LEXICAL_CONFIG)
     rec = clf.classify(
         "Beloved and Sula were both written by Maya Angelou",
-        [],
+        [
+            LinkedEntity(id="Q10", label="Beloved", link_score=1.0),
+            LinkedEntity(id="Q11", label="Sula", link_score=1.0),
+        ],
         claim_id="c1",
         relation_surface="written by",
         object_surface="Maya Angelou",  # absent from the path premise
@@ -552,7 +563,10 @@ def test_spurious_hub_fragility():
     clf = Classifier(ref, gate=gate, canon=canon, config=_LEXICAL_CONFIG)
     rec = clf.classify(
         "Book 0 and Book 1 share genre Genre Fiction",
-        [],
+        [
+            LinkedEntity(id="Q0", label="Book 0", link_score=1.0),
+            LinkedEntity(id="Q1", label="Book 1", link_score=1.0),
+        ],
         claim_id="c1",
         relation_surface="genre",  # 1a passes (P136 present on path)
         object_surface="Genre Fiction",  # 1b passes (value on path premise)
@@ -710,8 +724,12 @@ def test_path_tiebreak_is_deterministic():
     config = GroundingConfig(k_hops=2, tau=0.3)
     clf = Classifier(ref, gate=gate, canon=canon, config=config)
 
-    rec1 = clf.classify("Book A and Book B share an author", [], claim_id="c1")
-    rec2 = clf.classify("Book A and Book B share an author", [], claim_id="c1")
+    endpoints = [
+        LinkedEntity(id="Q10", label="Book A", link_score=1.0),
+        LinkedEntity(id="Q11", label="Book B", link_score=1.0),
+    ]
+    rec1 = clf.classify("Book A and Book B share an author", endpoints, claim_id="c1")
+    rec2 = clf.classify("Book A and Book B share an author", endpoints, claim_id="c1")
 
     # Both runs must agree.
     assert rec1.model_dump() == rec2.model_dump()
@@ -775,7 +793,12 @@ def test_k_hops_1_degrades_to_fabricated():
     clf = Classifier(ref, gate=gate, canon=_inmem_canon(), config=config)
     rec = clf.classify(
         "Beloved and Sula share author Toni Morrison",
-        [],
+        # Both endpoints linked: the multi-hop stage is entered, but with
+        # k_hops=1 the cutoff forbids any >=2-hop path, so it degrades.
+        [
+            LinkedEntity(id="Q10", label="Beloved", link_score=1.0),
+            LinkedEntity(id="Q11", label="Sula", link_score=1.0),
+        ],
         claim_id="c1",
     )
     # k_hops=1 means cutoff=1 for all_simple_paths, so only direct (1-node) paths
@@ -783,6 +806,111 @@ def test_k_hops_1_degrades_to_fabricated():
     assert rec.status == ClaimStatus.FABRICATED
     assert rec.grounding_path.edges == []
     assert rec.grounding_path.node_ids == []
+
+
+# ---------------------------------------------------------------------------
+# T1 (GR9 I1). Multi-hop endpoints are restricted to the claim's linked entities.
+# ---------------------------------------------------------------------------
+
+
+def test_multi_hop_requires_at_least_two_linked_endpoints():
+    # A genuine 2-hop entity path exists (Q10 - Q20 - Q11), but the claim links
+    # FEWER than two entity endpoints. With the I1 restriction the multi-hop
+    # stage is skipped entirely and the claim degrades to FABRICATED, even though
+    # the joint path premise would otherwise entail.
+    nodes = [
+        KGNode(id="Q10", label="Beloved"),
+        KGNode(id="Q11", label="Sula"),
+        KGNode(id="Q20", label="Toni Morrison"),
+    ]
+    edges = [
+        KGEdge(
+            subject_id="Q10",
+            property_id="P50",
+            property_label="written by",
+            object_id="Q20",
+            object_label="Toni Morrison",
+            value_type=ValueType.ITEM,
+        ),
+        KGEdge(
+            subject_id="Q11",
+            property_id="P50",
+            property_label="written by",
+            object_id="Q20",
+            object_label="Toni Morrison",
+            value_type=ValueType.ITEM,
+        ),
+    ]
+    ref = _ref(nodes, edges)
+    # Stub scores ONLY the joint 2-hop premise; single edges score 0 so the
+    # cascade would reach the multi-hop stage if it were not skipped.
+    gate = _StubGate(
+        [
+            ("Beloved written by Toni Morrison Sula", 0.9),
+            ("Sula written by Toni Morrison Beloved", 0.9),
+        ]
+    )
+    clf = Classifier(ref, gate=gate, canon=_inmem_canon(), config=_LEXICAL_CONFIG)
+    # Only ONE linked endpoint -> multi-hop skipped -> FABRICATED.
+    rec = clf.classify(
+        "Beloved and Sula share author Toni Morrison",
+        [LinkedEntity(id="Q10", label="Beloved", link_score=1.0)],
+        claim_id="c1",
+    )
+    assert rec.status == ClaimStatus.FABRICATED
+    assert rec.support_source == SupportSource.NONE
+    assert rec.grounding_path.edges == []
+    assert rec.grounding_path.node_ids == []
+
+
+def test_multi_hop_resolves_when_both_endpoints_linked():
+    # Same graph, but BOTH endpoints (Q10 and Q11) are linked. The 2-hop path
+    # between the two linked endpoints resolves REASONED_SUPPORTABLE.
+    nodes = [
+        KGNode(id="Q10", label="Beloved"),
+        KGNode(id="Q11", label="Sula"),
+        KGNode(id="Q20", label="Toni Morrison"),
+    ]
+    edges = [
+        KGEdge(
+            subject_id="Q10",
+            property_id="P50",
+            property_label="written by",
+            object_id="Q20",
+            object_label="Toni Morrison",
+            value_type=ValueType.ITEM,
+        ),
+        KGEdge(
+            subject_id="Q11",
+            property_id="P50",
+            property_label="written by",
+            object_id="Q20",
+            object_label="Toni Morrison",
+            value_type=ValueType.ITEM,
+        ),
+    ]
+    ref = _ref(nodes, edges)
+    gate = _StubGate(
+        [
+            ("Beloved written by Toni Morrison Sula", 0.9),
+            ("Sula written by Toni Morrison Beloved", 0.9),
+        ]
+    )
+    clf = Classifier(ref, gate=gate, canon=_inmem_canon(), config=_LEXICAL_CONFIG)
+    rec = clf.classify(
+        "Beloved and Sula share author Toni Morrison",
+        [
+            LinkedEntity(id="Q10", label="Beloved", link_score=1.0),
+            LinkedEntity(id="Q11", label="Sula", link_score=1.0),
+        ],
+        claim_id="c1",
+        relation_surface="written by",
+        object_surface="Toni Morrison",
+    )
+    assert rec.status == ClaimStatus.REASONED_SUPPORTABLE
+    assert rec.support_source == SupportSource.MULTI_HOP_PATH
+    assert len(rec.grounding_path.edges) == 2
+    assert rec.spurious_path is False
 
 
 # ---------------------------------------------------------------------------

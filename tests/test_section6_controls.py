@@ -1,28 +1,28 @@
 """
-SPEC-text §6 control harness — P0 subset (TS1).
+SPEC-text sec 6 control harness - P0 subset (TS1).
 
-Mapping of tests to §6 bullets:
+Mapping of tests to sec 6 bullets:
 
   test_control_sitelink_band_filter_*
-      -> §6 mechanical: sitelink-band filter (inclusive, drops None/missing).
+      -> sec 6 mechanical: sitelink-band filter (inclusive, drops None/missing).
 
   TestControl_ComposedManifestAttribution
-      -> §6 mechanical: composed-manifest attribution (ablate two entities,
+      -> sec 6 mechanical: composed-manifest attribution (ablate two entities,
          verify per-claim attribution routes to the right perturbation entries
-         in manifest order; SPEC-text §4.4).
+         in manifest order; SPEC-text sec 4.4).
 
   TestControl_SchemaRoundTrip
-      -> §6 mechanical: schema round-trip (GroundingRun JSON serialization,
+      -> sec 6 mechanical: schema round-trip (GroundingRun JSON serialization,
          ClaimStatus enum survival, status_counts() stability; guards
          dcc.Store JSON-serialization contract).
 
   TestControl_GradeAgainstReferenceInvariant_DataLayer
-      -> §6 / §3.2 spine: data-layer assertion — withhold touches only the
+      -> sec 6 / sec 3.2 spine: data-layer assertion - withhold touches only the
          GenerationContext; the GradingReference is NEVER ablated and still
          carries every fact.
 
   test_control_grade_against_reference_backend_stub_wired
-      -> §6 scaffold: asserts the P0 backend raises NotImplementedError;
+      -> sec 6 scaffold: asserts the P0 backend raises NotImplementedError;
          documents the seam that TS2 will close.
 
 Deferred to TS2 (require GR8 / GR9 / EX3):
@@ -55,11 +55,11 @@ from ivg_kg.schema import (
 )
 
 # ---------------------------------------------------------------------------
-# §6 Control 1: sitelink-band filter
+# sec 6 Control 1: sitelink-band filter
 # ---------------------------------------------------------------------------
 
-# Fixed band used throughout this control (does NOT import BAND_LO/BAND_HI —
-# the §6 control must be self-contained and test the FUNCTION, not config).
+# Fixed band used throughout this control (does NOT import BAND_LO/BAND_HI -
+# the sec 6 control must be self-contained and test the FUNCTION, not config).
 _BAND = (5, 40)
 _LO, _HI = _BAND
 
@@ -70,7 +70,7 @@ def _items_with_counts(counts: list[int | None]) -> list[dict]:
 
 
 def test_control_sitelink_band_filter_inclusive_and_drops_none() -> None:
-    """§6 control: sitelink-band filter.
+    """sec 6 control: sitelink-band filter.
 
     Verifies ALL of:
     - Inclusive lower boundary: count == lo is KEPT.
@@ -114,7 +114,7 @@ def test_control_sitelink_band_filter_inclusive_and_drops_none() -> None:
 
 
 def test_control_sitelink_band_filter_mixed_batch() -> None:
-    """§6 control: sitelink-band filter over a mixed batch.
+    """sec 6 control: sitelink-band filter over a mixed batch.
 
     A batch containing lo, hi, lo-1, hi+1, None, and a missing-key item:
     exactly the two boundary items (lo and hi) survive.
@@ -134,12 +134,12 @@ def test_control_sitelink_band_filter_mixed_batch() -> None:
 
 
 # ---------------------------------------------------------------------------
-# §6 Control 2: composed-manifest attribution
+# sec 6 Control 2: composed-manifest attribution
 # ---------------------------------------------------------------------------
 
 # Books-domain entities for the two-perturbation manifest.
-_E1 = "Q_E1"  # book entity — TextContentAbsence will act on description
-_E2 = "Q_E2"  # author entity — KnowledgeAbsence will act on triples
+_E1 = "Q_E1"  # book entity - TextContentAbsence will act on description
+_E2 = "Q_E2"  # author entity - KnowledgeAbsence will act on triples
 _E_OTHER = "Q_E_OTHER"  # unrelated entity (no perturbation touches it)
 
 # A TripleRef that anchors the KnowledgeAbsence perturbation on E2.
@@ -147,12 +147,12 @@ _E2_TRIPLE_REF = TripleRef(subject_id=_E2, property_id="P50", object_id="Q_AUTHO
 
 
 class TestControlComposedManifestAttribution:
-    """§6 control: composed-manifest attribution (SPEC-text §4.4).
+    """sec 6 control: composed-manifest attribution (SPEC-text sec 4.4).
 
     Two perturbations on DIFFERENT entities in a single AblationManifest:
-      - Entry 0: TextContentAbsence("Q_E1")  — ablates E1's description
+      - Entry 0: TextContentAbsence("Q_E1")  - ablates E1's description
       - Entry 1: KnowledgeAbsence([TripleRef("Q_E2", "P50", ...)])
-                                               — ablates E2's structural triple
+                                               - ablates E2's structural triple
 
     Per-claim attribution uses manifest.entries_touching(<linked entity ids>)
     to determine which perturbation entries are causally relevant to each claim.
@@ -181,7 +181,7 @@ class TestControlComposedManifestAttribution:
     def test_claim_linking_only_e1_attributed_to_text_entry(
         self, manifest: AblationManifest, p_text_id: str, p_know_id: str
     ) -> None:
-        """A claim whose linked entities are {E1} only → attributed to text entry."""
+        """A claim whose linked entities are {E1} only -> attributed to text entry."""
         attributed = manifest.entries_touching({_E1})
         assert attributed == [p_text_id], (
             f"Expected only the TextContentAbsence id {p_text_id!r}; got {attributed!r}"
@@ -191,7 +191,7 @@ class TestControlComposedManifestAttribution:
     def test_claim_linking_only_e2_attributed_to_knowledge_entry(
         self, manifest: AblationManifest, p_text_id: str, p_know_id: str
     ) -> None:
-        """A claim whose linked entities are {E2} only → attributed to knowledge entry."""
+        """A claim whose linked entities are {E2} only -> attributed to knowledge entry."""
         attributed = manifest.entries_touching({_E2})
         assert attributed == [p_know_id], (
             f"Expected only the KnowledgeAbsence id {p_know_id!r}; got {attributed!r}"
@@ -201,7 +201,7 @@ class TestControlComposedManifestAttribution:
     def test_claim_linking_both_attributed_to_both_in_manifest_order(
         self, manifest: AblationManifest, p_text_id: str, p_know_id: str
     ) -> None:
-        """A claim linking both E1 and E2 → attributed to BOTH, in manifest order."""
+        """A claim linking both E1 and E2 -> attributed to BOTH, in manifest order."""
         attributed = manifest.entries_touching({_E1, _E2})
         assert len(attributed) == 2
         assert attributed[0] == p_text_id, "text entry must come first (manifest order)"
@@ -210,14 +210,14 @@ class TestControlComposedManifestAttribution:
     def test_claim_linking_unrelated_entity_attributed_to_none(
         self, manifest: AblationManifest
     ) -> None:
-        """A claim linking only an unrelated entity → attributed to [] (none)."""
+        """A claim linking only an unrelated entity -> attributed to [] (none)."""
         attributed = manifest.entries_touching({_E_OTHER})
         assert attributed == [], f"Unrelated entity must yield []; got {attributed!r}"
 
     def test_attribution_uses_real_perturbation_ids(
         self, manifest: AblationManifest
     ) -> None:
-        """Assertions use the actual .id attributes — not hardcoded strings."""
+        """Assertions use the actual .id attributes - not hardcoded strings."""
         p_text = TextContentAbsence(_E1)
         p_know = KnowledgeAbsence([_E2_TRIPLE_REF])
         # Verify that the ids in the manifest match the freshly constructed ones.
@@ -227,12 +227,12 @@ class TestControlComposedManifestAttribution:
 
 
 # ---------------------------------------------------------------------------
-# §6 Control 3: schema round-trip
+# sec 6 Control 3: schema round-trip
 # ---------------------------------------------------------------------------
 
 
 class TestControlSchemaRoundTrip:
-    """§6 control: schema round-trip (GroundingRun JSON serialization contract).
+    """sec 6 control: schema round-trip (GroundingRun JSON serialization contract).
 
     Uses mock_grounding_run() which contains all three ClaimStatus values and
     a multi-hop path.  Guards the dcc.Store JSON-serialization contract.
@@ -286,9 +286,9 @@ class TestControlSchemaRoundTrip:
         original = mock_grounding_run()
         json_text = original.model_dump_json()
         # The literal string "reasoned" must only appear as part of
-        # "reasoned-supportable" — never as a standalone status value.
+        # "reasoned-supportable" - never as a standalone status value.
         assert '"reasoned"' not in json_text, (
-            "Found bare '\"reasoned\"' in serialized JSON — must be "
+            "Found bare '\"reasoned\"' in serialized JSON - must be "
             "'\"reasoned-supportable\"' (Invariant #5)"
         )
         assert '"reasoned-supportable"' in json_text
@@ -307,12 +307,12 @@ class TestControlSchemaRoundTrip:
         for claim in multi_hop_claims:
             assert len(claim.grounding_path.edges) >= 1
             for edge in claim.grounding_path.edges:
-                # traversed_forward is a bool — must be preserved exactly.
+                # traversed_forward is a bool - must be preserved exactly.
                 assert isinstance(edge.traversed_forward, bool)
 
 
 # ---------------------------------------------------------------------------
-# §6 Control 4: grade-against-reference invariant scaffold (§3.2 spine)
+# sec 6 Control 4: grade-against-reference invariant scaffold (sec 3.2 spine)
 # ---------------------------------------------------------------------------
 
 # Minimal books-domain fixture for the data-layer assertion.
@@ -376,9 +376,9 @@ def _build_full_reference() -> GradingReference:
 
 
 class TestControlGradeAgainstReferenceInvariantDataLayer:
-    """§6 / §3.2 spine — data-layer assertion (P0-runnable half).
+    """sec 6 / sec 3.2 spine - data-layer assertion (P0-runnable half).
 
-    SPEC-text §3.2: ablation withholds evidence from the GenerationContext ONLY.
+    SPEC-text sec 3.2: ablation withholds evidence from the GenerationContext ONLY.
     The GradingReference (KG-full triples + curated content labels) is NEVER
     ablated; a fact hidden from the generator remains gradable against KG-full.
 
@@ -421,7 +421,7 @@ class TestControlGradeAgainstReferenceInvariantDataLayer:
         ctx = _build_full_ctx()
         reference = _build_full_reference()
 
-        # Apply text withhold — this must not mutate reference.
+        # Apply text withhold - this must not mutate reference.
         _ = TextContentAbsence(_QE).withhold(ctx)
 
         # The content label for Q_E is still in the reference.
@@ -434,7 +434,7 @@ class TestControlGradeAgainstReferenceInvariantDataLayer:
         label_facts = [lb.fact for lb in ref_labels_for_qe]
         assert _CONTENT_FACT in label_facts, (
             f"The withheld fact {_CONTENT_FACT!r} must still be present in the "
-            "GradingReference content labels (SPEC-text §3.2)"
+            "GradingReference content labels (SPEC-text sec 3.2)"
         )
 
     def test_grading_reference_still_contains_structural_triple_after_knowledge_withhold(
@@ -448,7 +448,7 @@ class TestControlGradeAgainstReferenceInvariantDataLayer:
         ctx = _build_full_ctx()
         reference = _build_full_reference()
 
-        # Apply knowledge withhold — this must not mutate reference.
+        # Apply knowledge withhold - this must not mutate reference.
         _ = KnowledgeAbsence([_STRUCTURAL_TRIPLE_REF]).withhold(ctx)
 
         # The P50 triple for Q_E is still in the reference snapshot.
@@ -456,7 +456,7 @@ class TestControlGradeAgainstReferenceInvariantDataLayer:
         p50_edges = [e for e in ref_edges if e.subject_id == _QE and e.property_id == "P50"]
         assert len(p50_edges) >= 1, (
             "GradingReference.snapshot must still contain the P50 triple for Q_E "
-            "after KnowledgeAbsence.withhold (SPEC-text §3.2)"
+            "after KnowledgeAbsence.withhold (SPEC-text sec 3.2)"
         )
 
     def test_original_ctx_is_unchanged_after_text_withhold(self) -> None:
@@ -501,13 +501,13 @@ class TestControlGradeAgainstReferenceInvariantDataLayer:
         assert len(reference.snapshot.edges) == original_edge_count
 
     def test_ablated_ctx_lacks_description_but_reference_has_content_label(self) -> None:
-        """End-to-end data-layer invariant: single assertion encoding §3.2 directly.
+        """End-to-end data-layer invariant: single assertion encoding sec 3.2 directly.
 
         After withholding the description from the generation context:
           - ablated_ctx.description is None  (fact hidden from generator)
           - reference still has a ContentLabel with the same fact (still gradable)
 
-        This is the core §3.2 statement: "a fact hidden from the generator
+        This is the core sec 3.2 statement: "a fact hidden from the generator
         stays in the grading reference."
         """
         ctx = _build_full_ctx()
@@ -521,12 +521,12 @@ class TestControlGradeAgainstReferenceInvariantDataLayer:
         # The grader's reference still has the fact.
         ref_label_facts = [lb.fact for lb in reference.content_labels if lb.entity_id == _QE]
         assert _CONTENT_FACT in ref_label_facts, (
-            "SPEC-text §3.2 violated: fact hidden from generator is also absent from "
+            "SPEC-text sec 3.2 violated: fact hidden from generator is also absent from "
             "GradingReference; ablation must only affect GenerationContext."
         )
 
     def test_ablated_ctx_lacks_triple_but_reference_has_edge(self) -> None:
-        """End-to-end data-layer invariant for structural triples (§3.2).
+        """End-to-end data-layer invariant for structural triples (sec 3.2).
 
         After withholding the P50 triple from the generation context:
           - ablated_ctx has no P50 edge  (structural fact hidden from generator)
@@ -547,13 +547,13 @@ class TestControlGradeAgainstReferenceInvariantDataLayer:
             if e.subject_id == _QE and e.property_id == "P50"
         ]
         assert len(ref_p50) >= 1, (
-            "SPEC-text §3.2 violated: P50 edge hidden from generator is also absent from "
+            "SPEC-text sec 3.2 violated: P50 edge hidden from generator is also absent from "
             "GradingReference.snapshot.edges"
         )
 
 
 # ---------------------------------------------------------------------------
-# §6 Control 4 (scaffold): classification half — P0 backend stub is wired
+# sec 6 Control 4 (scaffold): classification half - P0 backend stub is wired
 # ---------------------------------------------------------------------------
 
 
@@ -571,18 +571,21 @@ def test_control_grade_against_reference_classification_half_ts2() -> None:  # p
     return a GroundingRun where the claim about the withheld fact is still
     graded RETRIEVED or REASONED_SUPPORTABLE (because the reference is full).
     """
-    raise AssertionError("TS2 placeholder — should not reach here")
+    raise AssertionError("TS2 placeholder - should not reach here")
 
 
 def test_control_grade_against_reference_backend_stub_wired() -> None:
-    """§6 scaffold: real grounding backend returns a valid GroundingRun.
+    """sec 6 scaffold: real grounding backend returns a valid GroundingRun.
 
     Updated from the P0 NotImplementedError stub by Task #1a.
     The slice backend classifies 'The Test Novel was written by Test Author.'
     against the KG-full reference and must produce a non-empty GroundingRun.
     """
     reference = _build_full_reference()
-    config = GroundingConfig()
+    # entailment="lexical": offline deterministic gate (no torch in CI). The real
+    # GR9 ground_response honours config.entailment; the default "minicheck" would
+    # require a model download.
+    config = GroundingConfig(entailment="lexical")
     run = ground_response(
         question="What is The Test Novel?",
         answer_text="The Test Novel was written by Test Author.",
