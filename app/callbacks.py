@@ -24,6 +24,7 @@ import dash
 from dash import ALL, Input, Output, State
 from dash.exceptions import PreventUpdate
 
+import app.run_source as _run_source
 from app.panels.analytics import multi_run_body, single_run_body
 from app.panels.answer import answer_span_children, render_claim_list
 from app.panels.repair import render_repair_body
@@ -42,8 +43,6 @@ from ivg_kg.mock.fixtures import (
     SUGGESTED_INJECT,
     editable_elements,
     effective_claims,
-    mock_answer_diagnostics,
-    mock_single_run_summary,
     statuses_for_graph,
 )
 from ivg_kg.schema import GroundingRun
@@ -124,7 +123,7 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
     )
     def style_subgraph(selected, mode, n, kg_selected, edits):  # noqa: ANN001
         if mode == "multi":
-            diag = mock_answer_diagnostics(int(n or 20))
+            diag = _run_source.get_answer_diagnostics(int(n or 20))
             sized = support_frequency_stylesheet(BASE_STYLESHEET, diag.support_frequency)
             return kg_item_highlight_stylesheet(sized, kg_selected or [])
         selected = selected or []
@@ -145,8 +144,8 @@ def register_callbacks(app: dash.Dash, run: GroundingRun, elements: list[dict]) 
     def render_analytics_body(mode, n):  # noqa: ANN001
         if mode == "multi":
             n = int(n or 20)
-            return multi_run_body(mock_answer_diagnostics(n), n)
-        return single_run_body(mock_single_run_summary())
+            return multi_run_body(_run_source.get_answer_diagnostics(n), n)
+        return single_run_body(_run_source.get_single_run_summary())
 
     # ---- F: mode -> show the multi-run controls only in multi-run mode ------
     @app.callback(
