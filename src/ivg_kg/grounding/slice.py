@@ -11,6 +11,11 @@ No network calls, no model downloads, no provider SDKs.  Pure deterministic Pyth
 
 All helpers accept and return schema types from ivg_kg.schema.  The public entry
 point is run_cascade(), called by backend.ground_response().
+
+GR7 note: the token-overlap and value-extraction utilities are now the canonical
+implementations in ivg_kg.grounding.entailment.  This module imports them from
+there to avoid duplication; the public entails() and _entails_detailed() APIs
+are preserved unchanged.
 """
 from __future__ import annotations
 
@@ -132,36 +137,13 @@ def link_entities(
 # ---------------------------------------------------------------------------
 # Step 3: entailment gate (SLICE stand-in for GR7 NLI)
 # ---------------------------------------------------------------------------
-# Deterministic token-overlap score: Jaccard over lowercase letter-tokens.
-# PLUS a value-sensitive check: if the claim asserts a date, number, or named
-# object that the premise contradicts or omits -> score forced below tau.
-# Asymmetric: premise = serialised evidence; hypothesis = claim.
+# Delegates to the GR7 canonical implementations in entailment.py.
+# The public entails() and _entails_detailed() APIs are preserved unchanged
+# so all existing call-sites (run_cascade, tests) continue to work.
 
-_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
-
-
-def _tokenise(text: str) -> set[str]:
-    return {t.lower() for t in _TOKEN_RE.findall(text)}
-
-
-# Patterns that detect a concrete value assertion in the hypothesis.
-_DATE_RE = re.compile(r"\b\d{4}\b|\b(?:january|february|march|april|may|june|july|august|"
-                      r"september|october|november|december)\b", re.I)
-_NUMBER_RE = re.compile(r"\b\d+(?:\.\d+)?\b")
-# Named-object: a capitalised multi-word phrase (heuristic)
-_NAMED_RE = re.compile(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+")
-
-
-def _extract_values(text: str) -> set[str]:
-    """Extract concrete value tokens (dates, numbers, named objects) from text."""
-    vals: set[str] = set()
-    for m in _DATE_RE.finditer(text):
-        vals.add(m.group(0).lower())
-    for m in _NUMBER_RE.finditer(text):
-        vals.add(m.group(0))
-    for m in _NAMED_RE.finditer(text):
-        vals.add(m.group(0).lower())
-    return vals
+from ivg_kg.grounding.entailment import (  # noqa: E402 -- import after top-of-file imports
+    _jaccard_with_value_guard,
+)
 
 
 def entails(premise: str, hypothesis: str) -> float:
@@ -170,6 +152,7 @@ def entails(premise: str, hypothesis: str) -> float:
     SLICE stand-in for GR7 NLI gate.  Asymmetric: premise is the serialised
     evidence string; hypothesis is the claim text.
 
+    Delegates to LexicalEntailmentGate logic (GR7 canonical implementation).
     Score = Jaccard(tokens(premise), tokens(hypothesis)).
     Value-sensitive override: if the hypothesis asserts a concrete value
     (date, number, named object) that is absent from or contradicted by the
@@ -200,38 +183,7 @@ def _entails_detailed(
     (not concrete value assertions) and do not trigger value-blocking.  Without
     this set, named objects are treated as concrete value assertions.
     """
-    if not premise or not hypothesis:
-        return 0.0, False
-
-    p_toks = _tokenise(premise)
-    h_toks = _tokenise(hypothesis)
-    union = p_toks | h_toks
-    if not union:
-        return 0.0, False
-
-    jaccard = len(p_toks & h_toks) / len(union)
-
-    # Value-sensitive check: extract concrete values asserted in the hypothesis.
-    h_vals = _extract_values(hypothesis)
-    if h_vals:
-        # Filter out entity mentions -- they are linking anchors, not value claims.
-        # A named value is filtered if it exactly matches an entity label OR
-        # if any entity label is a substring of it (handles prepended articles/prepositions).
-        if entity_labels is not None:
-            h_vals = {
-                v for v in h_vals
-                if v not in entity_labels
-                and not any(el in v for el in entity_labels if len(el) > 3)  # known slice heuristic; GR7 will replace
-            }
-        if h_vals:
-            p_vals = _extract_values(premise)
-            premise_lower = premise.lower()
-            for v in h_vals:
-                if v not in premise_lower and v not in p_vals:
-                    # Value assertion fails -- premise omits/contradicts it.
-                    return 0.0, (jaccard > 0.0)
-
-    return jaccard, False
+    return _jaccard_with_value_guard(premise, hypothesis, entity_labels)
 
 
 # ---------------------------------------------------------------------------
