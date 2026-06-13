@@ -1,0 +1,157 @@
+{
+  "bank_id": "bank-books-p0-v1",
+  "slice_id": "books-p0-v1",
+  "schema_version": "1.0",
+  "items": [
+    {
+      "item_id": "qb-b001",
+      "question": "Who wrote The Glass Menagerie?",
+      "tier": "one_hop_retrieval",
+      "entity_id": "Q678832",
+      "slice_id": "books-p0-v1",
+      "fact_type": "knowledge_structure",
+      "out_of_slice_expected": false,
+      "notes": "triple: Q678832 --[P50 author]--> Q134262 (Tennessee Williams)"
+    },
+    {
+      "item_id": "qb-b002",
+      "question": "Which publisher released The Glass Menagerie?",
+      "tier": "one_hop_retrieval",
+      "entity_id": "Q678832",
+      "slice_id": "books-p0-v1",
+      "fact_type": "knowledge_structure",
+      "out_of_slice_expected": false,
+      "notes": "triple: Q678832 --[P123 publisher]--> Q744182 (Random House); knowledge-absence pair for EX2 manifest"
+    },
+    {
+      "item_id": "qb-b003",
+      "question": "What genre or form is The Glass Menagerie?",
+      "tier": "ablated_entity",
+      "entity_id": "Q678832",
+      "slice_id": "books-p0-v1",
+      "fact_type": "genre_form",
+      "out_of_slice_expected": false,
+      "notes": "description 'play by Tennessee Williams' expresses form; also grounded in triple Q678832 --[P136 genre]--> Q17148218 (Memory play) and --[P7937 form]--> Q25379 (play); ablation of Q678832 description tests content-absence sensitivity"
+    },
+    {
+      "item_id": "qb-b004",
+      "question": "What kind of work is Blue Lantern by Viktor Pelevin?",
+      "tier": "ablated_entity",
+      "entity_id": "Q105485274",
+      "slice_id": "books-p0-v1",
+      "fact_type": "genre_form",
+      "out_of_slice_expected": false,
+      "notes": "description 'short story collection by Viktor Pelevin' expresses form; no P136 triple in slice so this fact lives exclusively in the description -- ablating Q105485274 description should cause FABRICATED for the collection claim"
+    },
+    {
+      "item_id": "qb-b005",
+      "question": "What tradition is The Jewel Ornament of Liberation associated with?",
+      "tier": "ablated_entity",
+      "entity_id": "Q96409397",
+      "slice_id": "books-p0-v1",
+      "fact_type": "tradition_affiliation",
+      "out_of_slice_expected": false,
+      "notes": "description 'key text in the Kagyu tradition of Tibetan Buddhism' expresses tradition/affiliation; no explicit tradition triple in slice edges -- gradable only via description content; ablation should flip RETRIEVED to FABRICATED"
+    },
+    {
+      "item_id": "qb-b006",
+      "question": "What is the scope or subject matter of Foundations of Real-World Economics by John Komlos?",
+      "tier": "one_hop_retrieval",
+      "entity_id": "Q112169066",
+      "slice_id": "books-p0-v1",
+      "fact_type": "scope",
+      "out_of_slice_expected": false,
+      "notes": "description 'book by John Komlos' plus triple Q112169066 --[P921 main subject]--> Q7181 (globalization); description situates it as real-world economics scope; content fact rests on the description substring 'real-world economics'"
+    },
+    {
+      "item_id": "qb-b007",
+      "question": "What descriptive role does the description give to Going South by Lorde?",
+      "tier": "ablated_entity",
+      "entity_id": "Q102376902",
+      "slice_id": "books-p0-v1",
+      "fact_type": "descriptive_role",
+      "out_of_slice_expected": false,
+      "notes": "description '2021 memoir and photobook by Lorde' expresses dual role (memoir + photobook); no triples capture this role -- purely description-grounded; ablating Q102376902 description tests content-absence sensitivity on role claims"
+    },
+    {
+      "item_id": "qb-b008",
+      "question": "What kind of scope does Principles of Economics by Carl Menger cover?",
+      "tier": "one_hop_retrieval",
+      "entity_id": "Q4338113",
+      "slice_id": "books-p0-v1",
+      "fact_type": "scope",
+      "out_of_slice_expected": false,
+      "notes": "description 'non-fiction work by Carl Menger' expresses scope; also grounded by triple Q4338113 --[P921 main subject]--> Q8134 (economics); scope fact rests on description 'non-fiction' plus main-subject triple"
+    },
+    {
+      "item_id": "qb-b009",
+      "question": "Who wrote Principles of Economics, and in what city was it first published?",
+      "tier": "multi_hop_reasoning",
+      "entity_id": "Q4338113",
+      "slice_id": "books-p0-v1",
+      "fact_type": null,
+      "out_of_slice_expected": false,
+      "notes": "two-hop: Q4338113 --[P50 author]--> Q84177 (Carl Menger) AND Q4338113 --[P291 place_of_pub]--> Q1741 (Vienna); both nodes in slice so out_of_slice_expected=false; knowledge-absence pair -- withholding P291 triple tests structural fact absence"
+    },
+    {
+      "item_id": "qb-b010",
+      "question": "Which books in the slice were written by Victor Pelevin, and what publisher released DTP(NN)?",
+      "tier": "multi_hop_reasoning",
+      "entity_id": "Q105485274",
+      "slice_id": "books-p0-v1",
+      "fact_type": null,
+      "out_of_slice_expected": false,
+      "notes": "two-hop: Q105485274 --[P50 author]--> Q246722 (Victor Pelevin) <--[P50 author]-- Q105623200 (DTP(NN)); then Q105623200 --[P123 publisher]--> Q3049652 (Eksmo); all nodes in-slice"
+    },
+    {
+      "item_id": "qb-b011",
+      "question": "What literary form is the Gesta Francorum Iherusalem peregrinantium by Fulcher of Chartres?",
+      "tier": "one_hop_retrieval",
+      "entity_id": "Q87073856",
+      "slice_id": "books-p0-v1",
+      "fact_type": "genre_form",
+      "out_of_slice_expected": false,
+      "notes": "description 'chronicle by Fulcher of Chartres' expresses form; also grounded by triple Q87073856 --[P136 genre]--> Q185363 (chronicle); dual grounding (description + triple)"
+    },
+    {
+      "item_id": "qb-b012",
+      "question": "What publisher released Foundations of Real-World Economics, and which author wrote it?",
+      "tier": "one_hop_retrieval",
+      "entity_id": "Q112169066",
+      "slice_id": "books-p0-v1",
+      "fact_type": "knowledge_structure",
+      "out_of_slice_expected": false,
+      "notes": "triple: Q112169066 --[P123 publisher]--> Q1508259 (Routledge); also Q112169066 --[P50 author]--> Q1668889 (John Komlos); knowledge-absence pair -- withholding P123 triple tests publisher-fact absence"
+    },
+    {
+      "item_id": "qb-b013",
+      "question": "Who wrote The Subtle Art of Not Giving a Fuck, and what year was it published?",
+      "tier": "multi_hop_reasoning",
+      "entity_id": "Q54488972",
+      "slice_id": "books-p0-v1",
+      "fact_type": null,
+      "out_of_slice_expected": true,
+      "notes": "triple: Q54488972 --[P50 author]--> Q27704915 (Mark Manson); description '2016 book by Mark Manson' carries publication year; out_of_slice_expected=true because the generator may mention Mark Manson's other works (out-of-slice) when elaborating"
+    },
+    {
+      "item_id": "qb-b014",
+      "question": "What is the descriptive form of Seven Wise Masters as given in its description?",
+      "tier": "ablated_entity",
+      "entity_id": "Q1219497",
+      "slice_id": "books-p0-v1",
+      "fact_type": "tradition_affiliation",
+      "out_of_slice_expected": false,
+      "notes": "description 'cycle of stories of Sanskrit, Persian or Hebrew origins' expresses tradition/origin affiliation; also grounded by triple Q1219497 --[P7937 form]--> Q5185279 (poem); ablating Q1219497 description tests content-absence on tradition claim"
+    },
+    {
+      "item_id": "qb-b015",
+      "question": "Who wrote Principles of Economics?",
+      "tier": "one_hop_retrieval",
+      "entity_id": "Q4338113",
+      "slice_id": "books-p0-v1",
+      "fact_type": "knowledge_structure",
+      "out_of_slice_expected": false,
+      "notes": "triple: Q4338113 --[P50 author]--> Q84177 (Carl Menger); knowledge-absence pair for EX2 ablation manifest -- withholding this triple tests structural author-fact absence"
+    }
+  ]
+}
