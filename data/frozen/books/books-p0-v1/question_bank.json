@@ -25,13 +25,13 @@
     },
     {
       "item_id": "qb-b003",
-      "question": "What genre or form is The Glass Menagerie?",
-      "tier": "ablated_entity",
+      "question": "What form is The Glass Menagerie classified as?",
+      "tier": "one_hop_retrieval",
       "entity_id": "Q678832",
       "slice_id": "books-p0-v1",
-      "fact_type": "genre_form",
+      "fact_type": "knowledge_structure",
       "out_of_slice_expected": false,
-      "notes": "description 'play by Tennessee Williams' expresses form; also grounded in triple Q678832 --[P136 genre]--> Q17148218 (Memory play) and --[P7937 form]--> Q25379 (play); ablation of Q678832 description tests content-absence sensitivity"
+      "notes": "triple: Q678832 --[P7937 form]--> Q25379 (play); also P136 genre -> Q17148218 (Memory play); form fact is triple-backed so classified as knowledge_structure not a content-absence probe"
     },
     {
       "item_id": "qb-b004",
@@ -55,13 +55,13 @@
     },
     {
       "item_id": "qb-b006",
-      "question": "What is the scope or subject matter of Foundations of Real-World Economics by John Komlos?",
+      "question": "Who is the author of Foundations of Real-World Economics?",
       "tier": "one_hop_retrieval",
       "entity_id": "Q112169066",
       "slice_id": "books-p0-v1",
-      "fact_type": "scope",
+      "fact_type": "knowledge_structure",
       "out_of_slice_expected": false,
-      "notes": "description 'book by John Komlos' plus triple Q112169066 --[P921 main subject]--> Q7181 (globalization); description situates it as real-world economics scope; content fact rests on the description substring 'real-world economics'"
+      "notes": "triple: Q112169066 --[P50 author]--> Q1668889 (John Komlos); reclassified from scope (the description 'book by John Komlos' does not express scope; the main-subject triple P921->globalization carries that fact)"
     },
     {
       "item_id": "qb-b007",
@@ -75,13 +75,13 @@
     },
     {
       "item_id": "qb-b008",
-      "question": "What kind of scope does Principles of Economics by Carl Menger cover?",
-      "tier": "one_hop_retrieval",
-      "entity_id": "Q4338113",
+      "question": "What kind of anthology is the Constantinian Excerpts?",
+      "tier": "ablated_entity",
+      "entity_id": "Q106995049",
       "slice_id": "books-p0-v1",
       "fact_type": "scope",
       "out_of_slice_expected": false,
-      "notes": "description 'non-fiction work by Carl Menger' expresses scope; also grounded by triple Q4338113 --[P921 main subject]--> Q8134 (economics); scope fact rests on description 'non-fiction' plus main-subject triple"
+      "notes": "description '53 volume Greek anthology' expresses scope; no P136/P921/P7937 triples exist for this entity -- scope fact is description-only; ablating Q106995049 description should cause FABRICATED for the anthology scope claim"
     },
     {
       "item_id": "qb-b009",
@@ -91,7 +91,7 @@
       "slice_id": "books-p0-v1",
       "fact_type": null,
       "out_of_slice_expected": false,
-      "notes": "two-hop: Q4338113 --[P50 author]--> Q84177 (Carl Menger) AND Q4338113 --[P291 place_of_pub]--> Q1741 (Vienna); both nodes in slice so out_of_slice_expected=false; knowledge-absence pair -- withholding P291 triple tests structural fact absence"
+      "notes": "two facts from one subject: Q4338113 --[P50 author]--> Q84177 (Carl Menger) AND Q4338113 --[P291 place_of_pub]--> Q1741 (Vienna); both nodes in slice so out_of_slice_expected=false; borderline-acceptable as reasoning over two outgoing triples from one subject; knowledge-absence pair -- withholding P291 triple tests structural fact absence"
     },
     {
       "item_id": "qb-b010",
@@ -101,47 +101,47 @@
       "slice_id": "books-p0-v1",
       "fact_type": null,
       "out_of_slice_expected": false,
-      "notes": "two-hop: Q105485274 --[P50 author]--> Q246722 (Victor Pelevin) <--[P50 author]-- Q105623200 (DTP(NN)); then Q105623200 --[P123 publisher]--> Q3049652 (Eksmo); all nodes in-slice"
+      "notes": "genuine two-hop path: Q105485274 --[P50 author]--> Q246722 (Victor Pelevin) <--[P50 author]-- Q105623200 (DTP(NN)); then Q105623200 --[P123 publisher]--> Q3049652 (Eksmo); all nodes in-slice; this is the reference genuine multi-hop item"
     },
     {
       "item_id": "qb-b011",
-      "question": "What literary form is the Gesta Francorum Iherusalem peregrinantium by Fulcher of Chartres?",
+      "question": "What literary form is the Gesta Francorum Iherusalem peregrinantium classified as?",
       "tier": "one_hop_retrieval",
       "entity_id": "Q87073856",
       "slice_id": "books-p0-v1",
-      "fact_type": "genre_form",
+      "fact_type": "knowledge_structure",
       "out_of_slice_expected": false,
-      "notes": "description 'chronicle by Fulcher of Chartres' expresses form; also grounded by triple Q87073856 --[P136 genre]--> Q185363 (chronicle); dual grounding (description + triple)"
+      "notes": "triple: Q87073856 --[P136 genre]--> Q185363 (chronicle); also has P7937->Q676 (prose); form fact is triple-backed so classified as knowledge_structure not a content-absence probe"
     },
     {
       "item_id": "qb-b012",
-      "question": "What publisher released Foundations of Real-World Economics, and which author wrote it?",
+      "question": "Which publisher released Foundations of Real-World Economics?",
       "tier": "one_hop_retrieval",
       "entity_id": "Q112169066",
       "slice_id": "books-p0-v1",
       "fact_type": "knowledge_structure",
       "out_of_slice_expected": false,
-      "notes": "triple: Q112169066 --[P123 publisher]--> Q1508259 (Routledge); also Q112169066 --[P50 author]--> Q1668889 (John Komlos); knowledge-absence pair -- withholding P123 triple tests publisher-fact absence"
+      "notes": "triple: Q112169066 --[P123 publisher]--> Q1508259 (Routledge); single publisher fact; knowledge-absence pair -- withholding P123 triple tests publisher-fact absence"
     },
     {
       "item_id": "qb-b013",
-      "question": "Who wrote The Subtle Art of Not Giving a Fuck, and what year was it published?",
+      "question": "Who wrote The Subtle Art of Not Giving a Fuck, and what other books by the same author appear in the slice?",
       "tier": "multi_hop_reasoning",
       "entity_id": "Q54488972",
       "slice_id": "books-p0-v1",
       "fact_type": null,
       "out_of_slice_expected": true,
-      "notes": "triple: Q54488972 --[P50 author]--> Q27704915 (Mark Manson); description '2016 book by Mark Manson' carries publication year; out_of_slice_expected=true because the generator may mention Mark Manson's other works (out-of-slice) when elaborating"
+      "notes": "two-hop: Q54488972 --[P50 author]--> Q27704915 (Mark Manson); the second part asks for other Manson works, which are NOT present in this slice -- out_of_slice_expected=true because Mark Manson has only one book (Q54488972) in books-p0-v1; a generator with broader knowledge may mention other Manson titles not grounded in this snapshot"
     },
     {
       "item_id": "qb-b014",
-      "question": "What is the descriptive form of Seven Wise Masters as given in its description?",
+      "question": "What are the cultural origins described for the Seven Wise Masters?",
       "tier": "ablated_entity",
       "entity_id": "Q1219497",
       "slice_id": "books-p0-v1",
       "fact_type": "tradition_affiliation",
       "out_of_slice_expected": false,
-      "notes": "description 'cycle of stories of Sanskrit, Persian or Hebrew origins' expresses tradition/origin affiliation; also grounded by triple Q1219497 --[P7937 form]--> Q5185279 (poem); ablating Q1219497 description tests content-absence on tradition claim"
+      "notes": "description 'cycle of stories of Sanskrit, Persian or Hebrew origins' expresses tradition/origin affiliation; no P921/P136 triple expresses these origins in the slice -- fact is description-only; ablating Q1219497 description tests content-absence on tradition/origin claims"
     },
     {
       "item_id": "qb-b015",
