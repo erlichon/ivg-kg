@@ -26,6 +26,7 @@ data = [
 grounding = [
     "transformers>=4.48.0",
     "torch>=2.5.1",
+    "einops>=0.8.0",
 ]
 dev = [
     "pytest>=8.3.4",

@@ -23,8 +23,12 @@ Design invariants (SPEC-text ss4.3):
     - VALUE-SENSITIVE (Invariant #3): a hypothesis asserting a concrete value
       (date/number/named-object) that the premise CONTRADICTS or OMITS scores
       0.0.  Entity-match alone is NOT support.
-    - DETERMINISTIC (Invariants #8/#14): fixed float32, no sampling, pinned
-      batch order on MPS.  Same (premise, hypothesis) -> identical float.
+    - DETERMINISTIC (Invariants #8/#14): greedy decoding, fixed bfloat16, no
+      sampling, pinned batch order on MPS.  Same (premise, hypothesis) ->
+      identical float within a single run/machine.  Cross-machine bit-identity
+      is relaxed for the 7B due to bfloat16 memory constraints, which is
+      acceptable because ALL reported numbers come from ONE cached offline
+      precompute run (Invariants #8/#22).
     - DIFFERENT MODEL FAMILY from the generator (no self-verification,
       Invariant #14).  This module imports NOTHING from grounding/clients/.
     - CACHE: each gate instance memoises entails() keyed by the
@@ -42,6 +46,21 @@ from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
 from typing import Any
+
+# ---------------------------------------------------------------------------
+# MiniCheck-7B canonical system prompt (verbatim from the official minicheck
+# package source).  Module-level ASCII constant; never modified at runtime.
+# The apostrophe in "claim's" and the straight double-quotes in "Yes"/"No"
+# are intentional -- they must match the original exactly for reproducibility.
+# ---------------------------------------------------------------------------
+
+SYSTEM_PROMPT: str = (
+    'Determine whether the provided claim is consistent with the corresponding'
+    ' document. Consistency in this context implies that all information'
+    ' presented in the claim is substantiated by the document. If not, it'
+    " should be considered inconsistent. Please assess the claim's consistency"
+    ' with the document by responding with either "Yes" or "No".'
+)
 
 # ---------------------------------------------------------------------------
 # Base ABC
@@ -210,6 +229,85 @@ class LexicalEntailmentGate(BaseEntailmentGate):
 
 
 # ---------------------------------------------------------------------------
+# MiniCheck-7B pure scoring helpers
+# These functions are UNIT-TESTABLE without any model and contain all the
+# probability arithmetic so _score() is testable via stubs.
+# ---------------------------------------------------------------------------
+
+
+def _yes_prob_from_logits(logits: Any, yes_token_ids: list[int]) -> float:
+    """Compute P(yes) as the total softmax mass on the given yes-token ids.
+
+    Args:
+        logits: 1-D float tensor of shape (vocab_size,) from the first
+                generated step (outputs.scores[0][0]).  Caller is responsible
+                for ensuring torch is already imported before calling this
+                helper (it is always called from _score, which does
+                ``import torch`` at its head, or from tests that import torch).
+        yes_token_ids: list of vocabulary ids considered as "yes" first-token
+                       variants (may be empty, in which case 0.0 is returned).
+
+    Returns:
+        float in [0, 1]: sum of softmax(logits)[i] for i in yes_token_ids.
+
+    This mirrors the official minicheck package's approach of summing
+    exp(logprob) over tokens whose decoded form lowercased equals "yes",
+    but operates directly on ids so the test suite can exercise it without
+    a tokenizer.  Softmax is computed in float32 regardless of the input
+    dtype for bit-stability.
+
+    NOTE: no ``import torch`` here -- this function uses only tensor instance
+    methods (.float(), .softmax(), .sum()) so that it does not trigger a
+    re-import of torch's C extension after the module has been temporarily
+    removed from sys.modules (which would re-register the dispatch registry
+    and raise a RuntimeError).  Torch is guaranteed available at the call
+    site: either _score() has already done ``import torch``, or the test
+    suite has ``import torch`` at module level.
+    """
+    if not yes_token_ids:
+        return 0.0
+    # Use tensor instance method to avoid calling torch.softmax() directly.
+    probs = logits.float().softmax(dim=0)
+    yes_prob = probs[yes_token_ids].sum()
+    return float(yes_prob.item())
+
+
+# Yes-variant strings to probe when building the yes-token-id set.
+_YES_VARIANTS: tuple[str, ...] = ("Yes", "yes", " Yes", " yes")
+
+
+def _yes_token_ids_for_tokenizer(tokenizer: Any) -> list[int]:
+    """Return the de-duplicated list of single-token ids for yes-variant strings.
+
+    For each string in ("Yes", "yes", " Yes", " yes"), encode with
+    add_special_tokens=False; keep only those that produce exactly one token
+    id (multi-piece encodings are dropped because the first-token logit is
+    ambiguous if the answer spans multiple pieces).  Deduplicate while
+    preserving first-seen order.
+
+    This matches the approach of the official minicheck package, which sums
+    probability mass over decoded tokens whose .lower() == "yes".
+
+    Args:
+        tokenizer: any tokenizer with an .encode(str, add_special_tokens=bool)
+                   method (real or stub).
+
+    Returns:
+        list[int]: deduplicated single-token ids for yes-variants.
+    """
+    seen: set[int] = set()
+    ids: list[int] = []
+    for variant in _YES_VARIANTS:
+        token_ids = tokenizer.encode(variant, add_special_tokens=False)
+        if len(token_ids) == 1:
+            tok_id = token_ids[0]
+            if tok_id not in seen:
+                seen.add(tok_id)
+                ids.append(tok_id)
+    return ids
+
+
+# ---------------------------------------------------------------------------
 # Lazy loader stubs -- replaced by actual loaders inside the concrete gates.
 # Exposed at module level so tests can monkeypatch them.
 # ---------------------------------------------------------------------------
@@ -235,20 +333,42 @@ def _load_deberta_model(model_id: str) -> Any:  # pragma: no cover
 
 
 def _load_minicheck_model(model_id: str) -> Any:  # pragma: no cover
-    """Lazy-load MiniCheck scorer.  Only called on first entails() invocation.
+    """Lazy-load Bespoke-MiniCheck-7B scorer.  Only called on first _score() invocation.
 
-    Pinned to float32 for bit-stable determinism (SPEC ss4.3, Invariants #8/#14).
-    .eval() disables dropout/batch-norm stochasticity for the calibration path.
+    MiniCheck-7B is an InternLM2 DECODER-ONLY (causal) LM, NOT seq2seq.
+    It must be loaded with:
+        - AutoModelForCausalLM (NOT AutoModelForSeq2SeqLM)
+        - trust_remote_code=True  (InternLM2 modeling code lives in the repo)
+        - dtype=torch.bfloat16  (bf16 ~14GB fits 48GB MPS; float32 ~28GB is too large)
+
+    Determinism note: greedy decoding + fixed model state gives bit-stable scores
+    within a single run/machine.  Cross-machine bit-identity is relaxed for the 7B
+    due to bfloat16 precision and MPS numerics, which is acceptable because ALL
+    reported/figure numbers come from ONE cached offline precompute run
+    (Invariants #8/#22).  .eval() disables dropout stochasticity.
+
+    Device: MPS when available (Apple Silicon); CPU fallback.
+
+    Returns:
+        (tokenizer, model, device) -- the device string is returned so _score
+        can place input tensors on the correct device without re-detecting it.
     """
-    # MiniCheck uses the transformers AutoModelForSeq2SeqLM interface.
-    # Import is deferred to keep the module importable without transformers.
     import torch  # noqa: PLC0415 -- intentionally lazy
-    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer  # noqa: PLC0415
+    from transformers import AutoModelForCausalLM, AutoTokenizer  # noqa: PLC0415
 
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_id, torch_dtype=torch.float32)
+    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        trust_remote_code=True,
+        dtype=torch.bfloat16,
+    )
     model.eval()
-    return tokenizer, model
+    if torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    model.to(device)
+    return tokenizer, model, device
 
 
 # ---------------------------------------------------------------------------
@@ -329,73 +449,83 @@ class MiniCheckEntailmentGate(BaseEntailmentGate):
         from ivg_kg import config as _cfg  # noqa: PLC0415
 
         self._model_id = model_id or _cfg.MINICHECK_MODEL_ID
-        self._tokenizer: Any = None  # loaded lazily
+        self._tokenizer: Any = None  # loaded lazily on first _score()
         self._model: Any = None  # loaded lazily
+        self._device: str = "cpu"  # updated when model is loaded
+        self._yes_token_ids: list[int] | None = None  # cached after first _score()
 
     def _score(self, premise: str, hypothesis: str) -> float:  # pragma: no cover
-        """Fact-checking score via MiniCheck-7B.
+        """Fact-checking score via Bespoke-MiniCheck-7B (canonical scoring).
 
-        Returns a CALIBRATED support probability in [0, 1] that the premise
-        supports the hypothesis (fact-checking direction: premise = document,
-        hypothesis = claim).  The probability is read from the FIRST generated
-        step's logits restricted to the "yes"/"no" answer tokens and softmaxed
-        over those two; the mass on "yes" is the support probability.  This
-        preserves the graded signal the GR10 reliability curve needs instead of
-        collapsing to a hard {1.0, 0.0} decision.
+        Scoring method (mirrors the official minicheck package):
+          1. Build a two-turn chat: system = SYSTEM_PROMPT, user = the
+             "Document: {premise}\\nClaim: {hypothesis}" prompt.
+          2. Apply the InternLM2 chat template via tokenizer.apply_chat_template
+             with add_generation_prompt=True to obtain input_ids.  The chat
+             template is REQUIRED because the model is chat-tuned; feeding a raw
+             concatenated string yields incorrect results.
+          3. Greedy decode exactly one new token (max_new_tokens=1, do_sample=False,
+             num_beams=1) under torch.no_grad(), requesting per-step logits via
+             output_scores=True + return_dict_in_generate=True.
+          4. Take outputs.scores[0][0] (vocab-size 1-D tensor for the first and
+             only generated step).
+          5. Softmax over the FULL vocabulary in float32.
+          6. Sum the softmax probability mass on all single-token "yes"-variant
+             ids ("Yes", "yes", " Yes", " yes") -- this is P(yes), the support
+             probability returned to the caller.
 
-        Determinism: float32, greedy decoding (num_beams=1, do_sample=False),
-        fixed input format and a single forward step ensure bit-stable scores.
+        Value-sensitivity (Invariant #3): a wrong-value claim causes the model
+        to answer "No", producing a low P(yes) -> FABRICATED signal.
+
+        Determinism: greedy (no sampling), fixed bf16 model state, pinned
+        input format.  Bit-stable within a run/machine; cross-machine relaxed
+        per the bfloat16 memory constraint (Invariants #8/#22).
+
+        Empty premise or hypothesis short-circuits to 0.0 without model call.
         """
         import torch  # noqa: PLC0415 -- intentionally lazy
-
-        if self._tokenizer is None or self._model is None:
-            self._tokenizer, self._model = _load_minicheck_model(self._model_id)
 
         if not premise or not hypothesis:
             return 0.0
 
-        # MiniCheck input format: "Document: <premise> Claim: <hypothesis>"
-        text = f"Document: {premise} Claim: {hypothesis}"
-        inputs = self._tokenizer(
-            text,
+        if self._tokenizer is None or self._model is None:
+            self._tokenizer, self._model, self._device = _load_minicheck_model(self._model_id)
+
+        # Build the canonical two-turn chat messages.
+        user_prompt = f"Document: {premise}\nClaim: {hypothesis}"
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        # apply_chat_template produces the full prompt string with special tokens
+        # for the InternLM2 chat format and appends the generation-start marker.
+        input_ids = self._tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
             return_tensors="pt",
-            truncation=True,
-            max_length=2048,
-        )
-        # Greedy decoding; no sampling; float32 for determinism on MPS. We need
-        # the per-step logits to recover the token-level support probability, so
-        # request scores back from generate().
+        ).to(self._device)
+
+        # Greedy single-token decode with logits returned.
         with torch.no_grad():
             outputs = self._model.generate(
-                **inputs,
+                input_ids,
                 max_new_tokens=1,
                 do_sample=False,
                 num_beams=1,
                 output_scores=True,
                 return_dict_in_generate=True,
             )
-        # First generated step's logits over the full vocabulary.
+
+        # First (and only) generated step's full-vocabulary logits.
         first_step_logits = outputs.scores[0][0]
-        # Answer-token ids for "yes"/"no". add_special_tokens=False so we get the
-        # bare answer-word piece; each must be exactly one token so the logit
-        # index is unambiguous. A future tokenizer that splits "yes"/"no" into
-        # multiple pieces would silently score on the wrong sub-token without this
-        # guard.
-        yes_ids = self._tokenizer.encode("yes", add_special_tokens=False)
-        no_ids = self._tokenizer.encode("no", add_special_tokens=False)
-        if len(yes_ids) != 1 or len(no_ids) != 1:
-            raise ValueError(
-                f"MiniCheck tokenizer encoded 'yes' to {yes_ids} and 'no' to {no_ids}; "
-                "each must encode to exactly one token for unambiguous logit indexing. "
-                "This tokenizer is incompatible with the single-token scoring assumption."
-            )
-        yes_id = yes_ids[0]
-        no_id = no_ids[0]
-        # Softmax over just the two answer-token logits; mass on "yes" is the
-        # calibrated support probability.
-        pair = torch.stack([first_step_logits[yes_id], first_step_logits[no_id]])
-        probs = torch.softmax(pair.float(), dim=0)
-        return float(probs[0].item())
+
+        # Compute and cache the yes-variant token-id set on first _score() call.
+        if self._yes_token_ids is None:
+            self._yes_token_ids = _yes_token_ids_for_tokenizer(self._tokenizer)
+
+        # P(yes) = sum of softmax(full vocab logits) at all yes-variant ids.
+        return _yes_prob_from_logits(first_step_logits, self._yes_token_ids)
 
 
 # ---------------------------------------------------------------------------
