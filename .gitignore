@@ -228,6 +228,10 @@ data/runs/*
 # REAL mode and tests/test_run_source.py), and the .gitkeep placeholder.
 !data/runs/.gitkeep
 !data/runs/slice-*.json
+# EX4 figure output directory: HTML/PNG/PDF are produced by scripts/emit_rq2_figure.py;
+# do NOT commit these (they are regenerated from frozen sweep data).
+data/figures/*
+!data/figures/.gitkeep
 
 # Tool caches
 .ruff_cache/

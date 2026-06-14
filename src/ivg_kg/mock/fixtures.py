@@ -767,3 +767,105 @@ def effective_claims(edits: list[dict] | None = None) -> list[ClaimRecord]:
 
 def claim_text_by_id() -> dict[str, str]:
     return {c.claim_id: c.text for c in canonical_claims()}
+
+
+# ---------------------------------------------------------------------------
+# Multi-condition runset for RQ2 (SPEC-text §4.8 / sec 8 / EX4).
+# build_runset() above covers FULL only.  Here we add the two withhold conditions
+# so the RQ2 modality-contrast aggregate has data to operate on.
+#
+# Under CONTENT_ABSENT (description withheld from the generator):
+#   c4 and c5 (multi-hop France claims that the description hints) become harder
+#   to ground; about half the time they fabricate (elevated vs FULL).
+# Under KNOWLEDGE_ABSENT (all outgoing triples withheld):
+#   c1, c2, c4, c5, c6 all lose their structural evidence and mostly fabricate;
+#   only the bare date claim (c3) stays its usual state (already unsupported).
+#
+# These outcome distributions are HAND-AUTHORED to demonstrate a clear but
+# proportionate shift (more fabrication under both withhold conditions), with
+# KNOWLEDGE_ABSENT > CONTENT_ABSENT (more structural evidence is withheld).
+# ---------------------------------------------------------------------------
+
+# Outcome counts for CONTENT_ABSENT: c4/c5 become less stable (description gone).
+_OUTCOME_COUNTS_CONTENT: dict[str, dict[str, int]] = {
+    "c1": {_OK: 18, _FAB: 1, _ABS: 1},       # father triple: structure; still present
+    "c2": {_OK: 17, _FAB: 2, _ABS: 1},        # place of birth: slightly less stable
+    "c3": {_FAB: 16, _ABS: 4},                 # date gap: still absent
+    "c4": {_OK: 10, _FAB: 6, _ABS: 4},        # multi-hop France: harder without description
+    "c5": {_OK: 8, _FAB: 12},                  # spurious France: even less stable
+    "c6": {_OK: 18, _FAB: 1, _ABS: 1},        # notable work: structure; still present
+}
+
+# Outcome counts for KNOWLEDGE_ABSENT: all structure triples withheld from generator.
+_OUTCOME_COUNTS_KNOWLEDGE: dict[str, dict[str, int]] = {
+    "c1": {_FAB: 16, _ABS: 4},                # father triple: withheld -> mostly fab
+    "c2": {_FAB: 14, _ABS: 6},                # place of birth: withheld -> mostly fab
+    "c3": {_FAB: 16, _ABS: 4},                # date gap: still absent
+    "c4": {_FAB: 15, _ABS: 5},                # multi-hop: no evidence -> fab
+    "c5": {_FAB: 18, _ABS: 2},                # spurious: no evidence -> fab
+    "c6": {_FAB: 12, _ABS: 8},                # notable work: withheld -> mostly fab
+}
+
+# Map Condition -> outcome counts dict.
+_CONDITION_OUTCOME_COUNTS: dict[str, dict[str, dict[str, int]]] = {
+    Condition.FULL.value: _OUTCOME_COUNTS,
+    Condition.CONTENT_ABSENT.value: _OUTCOME_COUNTS_CONTENT,
+    Condition.KNOWLEDGE_ABSENT.value: _OUTCOME_COUNTS_KNOWLEDGE,
+}
+
+
+def build_condition_runset(n: int = _MAX_DRAWS, condition: Condition = Condition.FULL) -> list[GroundingRun]:
+    """The N runs under a single condition (SPEC-text §4.8 / EX4).
+
+    Analogous to build_runset (which covers FULL only).  Claims are NOT aligned
+    across runs.  The condition determines which outcome-distribution table is used.
+    """
+    n = max(1, min(n, _MAX_DRAWS))
+    cond_val = condition.value
+    counts = _CONDITION_OUTCOME_COUNTS.get(cond_val, _OUTCOME_COUNTS)
+    templates = {c.claim_id: c for c in canonical_claims()}
+    outcome_seqs = {cid: _spread(counts[cid], _OUTCOME_ORDER) for cid in counts}
+    runs: list[GroundingRun] = []
+    for j in range(n):
+        claims: list[ClaimRecord] = []
+        for cid in ("c1", "c2", "c3", "c4", "c5", "c6"):
+            if cid not in outcome_seqs:
+                continue
+            outcome = outcome_seqs[cid][j]
+            if outcome == _ABS:
+                continue
+            tmpl = templates[cid]
+            if outcome == _OK and tmpl.status != ClaimStatus.FABRICATED:
+                claims.append(tmpl.model_copy(update={"claim_id": f"r{j}-{cid}"}))
+            else:
+                claims.append(
+                    ClaimRecord(
+                        claim_id=f"r{j}-{cid}", text=_FAB_TEXT[cid],
+                        status=ClaimStatus.FABRICATED, support_source=SupportSource.NONE,
+                        linked_entities=list(tmpl.linked_entities),
+                        grounding_path=GroundingPath(edges=[], node_ids=[]),
+                        active_perturbations=[f"remove-{cond_val}"],
+                    )
+                )
+        runs.append(
+            GroundingRun(
+                run_id=f"chopin-{cond_val}-{j}", question=QUESTION,
+                answer_text=ANSWER_TEXT, slice="books", phase="A",
+                condition=condition, sample_index=j, claims=claims,
+                grading_reference_id="chopin-mock-v1", error_rates=dict(ERROR_RATES),
+            )
+        )
+    return runs
+
+
+def mock_condition_diagnostics(n: int = _MAX_DRAWS) -> dict[str, AnswerDiagnostics]:
+    """Multi-run AnswerDiagnostics for the three RQ2 conditions (SPEC-text §4.8 / EX4).
+
+    Returns {condition_value: AnswerDiagnostics} for FULL, CONTENT_ABSENT, and
+    KNOWLEDGE_ABSENT.  Claims are NOT aligned across conditions or runs.
+    """
+    return {
+        Condition.FULL.value: aggregate_runset(build_condition_runset(n, Condition.FULL)),
+        Condition.CONTENT_ABSENT.value: aggregate_runset(build_condition_runset(n, Condition.CONTENT_ABSENT)),
+        Condition.KNOWLEDGE_ABSENT.value: aggregate_runset(build_condition_runset(n, Condition.KNOWLEDGE_ABSENT)),
+    }
