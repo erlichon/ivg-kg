@@ -45,7 +45,7 @@ WDQS_USER_AGENT: str = (
 # These are config constants only; nothing is downloaded at P0.
 # ---------------------------------------------------------------------------
 
-# Local/open LLM used as the POC default behind BaseAIClient.
+# Local/open LLM (Llama family) kept as a named constant; not the active generator.
 LOCAL_LLM_MODEL_ID: str = "meta-llama/Llama-3.2-3B-Instruct"
 
 # Entailment models for the VERIFIER (deterministic measurement instrument, NOT
@@ -68,11 +68,13 @@ VLM_MODEL_ID: str = "Qwen/Qwen2.5-VL-3B-Instruct"
 # ---------------------------------------------------------------------------
 
 # Backend used by get_default_client() and the grounding pipeline (GR4+).
-DEFAULT_CLIENT_BACKEND: str = "local"
+# Generator decision FINALIZED: Qwen2.5-7B-Instruct via Ollama (Invariant #14).
+DEFAULT_CLIENT_BACKEND: str = "ollama"
 
 # Ollama server config (used by OllamaClient).
 OLLAMA_BASE_URL: str = "http://localhost:11434"
-OLLAMA_MODEL_ID: str = "llama3.2"
+# Generator model: Qwen2.5-7B-Instruct served locally via Ollama.
+OLLAMA_MODEL_ID: str = "qwen2.5"
 
 # Generation sampling parameters (Invariant #14: stochastic generator, seeded).
 # Callers override per-draw; these are the defaults exposed on generate_answer().

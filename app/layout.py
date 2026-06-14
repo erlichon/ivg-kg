@@ -179,10 +179,11 @@ def _settings_panel() -> html.Div:
                             dcc.Dropdown(
                                 id="gen-model",
                                 options=[
+                                    {"label": "Qwen2.5-7B-Instruct (ollama)", "value": "ollama"},
                                     {"label": "Llama-3.2-3B-Instruct (local)", "value": "local"},
                                     {"label": "cloud · BaseAIClient adapter", "value": "cloud"},
                                 ],
-                                value="local", clearable=False,
+                                value="ollama", clearable=False,
                                 style={"width": "240px", "color": "#111", "fontSize": "0.8em"},
                             ),
                         ],

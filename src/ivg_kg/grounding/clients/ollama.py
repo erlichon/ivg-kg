@@ -75,14 +75,39 @@ class OllamaClient(BaseAIClient):
             payload["options"]["seed"] = seed  # type: ignore[index]
 
         url = f"{self._base_url}/api/generate"
+        # Gather the "server unreachable" exception types from the requests module,
+        # plus builtin OSError/TimeoutError so tests that stub a minimal fake module
+        # still work correctly.
+        _conn_exc = getattr(
+            getattr(requests, "exceptions", None), "ConnectionError", ConnectionError
+        )
+        _timeout_exc = getattr(
+            getattr(requests, "exceptions", None), "Timeout", TimeoutError
+        )
         try:
             response = requests.post(url, json=payload, timeout=60)
-            response.raise_for_status()
+        except (_conn_exc, _timeout_exc, ConnectionError, TimeoutError, OSError) as exc:
+            raise RuntimeError(
+                f"OllamaClient: Ollama server is not reachable at {self._base_url}. "
+                f"Start it with: ollama serve"
+            ) from exc
         except Exception as exc:
             raise RuntimeError(
-                f"OllamaClient: request to {url} failed: {exc}"
+                f"OllamaClient: unexpected error contacting {self._base_url}: {exc}"
             ) from exc
+
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"OllamaClient: model not available (HTTP {response.status_code}). "
+                f"Pull it with: ollama pull {self._model}"
+            )
 
         data: dict[str, Any] = response.json()
         answer: str = data.get("response", "")
+        if not answer:
+            raise RuntimeError(
+                f"OllamaClient: Ollama returned an empty response for model '{self._model}'. "
+                f"Check that the model is fully loaded and the prompt is valid. "
+                f"To re-pull the model: ollama pull {self._model}"
+            )
         return GenerationResult(answer=answer, evidence_trace=None)
