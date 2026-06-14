@@ -21,11 +21,24 @@ Reported numbers come from the offline MiniCheck-7B path (Invariant #22).
 The lexical gate is for CI/fixture smoke tests ONLY and must NEVER source a
 reported number.
 
+Incremental writes + resume
+---------------------------
+Each run file is written to out_dir IMMEDIATELY after it is produced (not
+only at the end of the sweep).  If the sweep is interrupted (crash, Ollama
+drop, machine sleep), re-running the SAME command with --resume (the default)
+will skip all (item, condition, sample) combinations whose output file already
+exists in out_dir and continue from where it left off.  Use --no-resume to
+force a full regeneration regardless of existing files.
+
 Usage (smoke / CI):
     uv run python scripts/run_books_sweep.py --stub --gate lexical --n-runs 1
 
 Usage (real run on Apple-Silicon with Ollama + MiniCheck):
     uv run python scripts/run_books_sweep.py --n-runs 20
+
+Usage (resume an interrupted run):
+    uv run python scripts/run_books_sweep.py --n-runs 20
+    # (re-run the same command; --resume is ON by default)
 """
 
 from __future__ import annotations
@@ -93,6 +106,7 @@ def build_books_sweep(
     gate: str = "minicheck",
     tau: float | None = None,
     out_dir: Path | None = None,
+    resume: bool = True,
 ):
     """Run the M-BOOKS offline precompute sweep and return the RunSet.
 
@@ -111,16 +125,22 @@ def build_books_sweep(
         (frozen_tau). Override with an explicit float.
     out_dir:
         Directory to write run files. Defaults to data/runs/.
+    resume:
+        If True (default), check out_dir for existing run files before each
+        grounding and skip (load from disk) any that are already present.
+        Set to False to force a full regeneration regardless of existing files.
+        Resume assumes the same bank/config/reference (run_id does not encode
+        config); delete stale files manually if inputs change.
 
     Returns
     -------
     RunSet
-        The completed sweep (also written to out_dir).
+        The completed sweep (also written to out_dir incrementally).
     """
     from ivg_kg.data.reference import load_reference
     from ivg_kg.experiment.ablation import manifest_perturbations_for
     from ivg_kg.experiment.question_bank import load_question_bank
-    from ivg_kg.experiment.sweep import run_sweep, write_runset
+    from ivg_kg.experiment.sweep import run_sweep, write_one_run, write_runset
     from ivg_kg.perturbation.base import AblationManifest
     from ivg_kg.schema import Condition, GroundingConfig
 
@@ -165,6 +185,14 @@ def build_books_sweep(
     # --- Build manifest-driven perturbations adapter -------------------------
     adapter = manifest_perturbations_for(manifest)
 
+    # --- Resolve output directory and incremental sink -----------------------
+    target = out_dir if out_dir is not None else _RUNS_DIR
+    target.mkdir(parents=True, exist_ok=True)
+
+    def _run_sink(run) -> None:
+        """Write each run to disk immediately after it is produced."""
+        write_one_run(run, target)
+
     # --- Progress callback ---------------------------------------------------
     _sweep_start = time.monotonic()
 
@@ -203,10 +231,13 @@ def build_books_sweep(
         perturbations_for=adapter,
         emit_no_repair_baseline=True,
         on_run_complete=_on_run_complete,
+        run_sink=_run_sink,
+        resume_dir=target if resume else None,
     )
 
-    # --- Write runs ----------------------------------------------------------
-    target = out_dir if out_dir is not None else _RUNS_DIR
+    # --- Final write (idempotent: incremental sink already wrote all files) --
+    # Kept for completeness; rewrites files that were written incrementally
+    # above.  Safe to call: write_runset overwrites with identical content.
     write_runset(runset, out_dir=target)
 
     return runset
@@ -221,7 +252,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=(
             "M-BOOKS offline precompute sweep (A3-PREP). "
-            "Default: Qwen2.5 generator + MiniCheck-7B verifier, n_runs=20."
+            "Default: Qwen2.5 generator + MiniCheck-7B verifier, n_runs=20. "
+            "Each run file is written to out_dir immediately as it is produced "
+            "(incremental crash-safe writes). Re-running with --resume (default) "
+            "skips any (item, condition, sample) whose output file already exists."
         )
     )
     p.add_argument(
@@ -262,6 +296,22 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="DIR",
         help=f"Output directory. Default: {_RUNS_DIR}",
     )
+    p.add_argument(
+        "--resume",
+        action="store_true",
+        default=True,
+        help=(
+            "Resume an interrupted sweep: skip any (item, condition, sample) whose "
+            "output file already exists in out_dir. ON by default. "
+            "Assumes the same bank/config/reference as the original run."
+        ),
+    )
+    p.add_argument(
+        "--no-resume",
+        dest="resume",
+        action="store_false",
+        help="Force full regeneration of all runs, ignoring any existing output files.",
+    )
     return p
 
 
@@ -275,6 +325,7 @@ def main(argv: list[str] | None = None) -> None:
         gate=args.gate,
         tau=args.tau,
         out_dir=args.out_dir,
+        resume=args.resume,
     )
 
     from ivg_kg.schema import Condition

@@ -61,6 +61,7 @@ __all__ = [
     "default_perturbations_for",
     "RunSet",
     "run_sweep",
+    "write_one_run",
     "write_runset",
 ]
 
@@ -207,6 +208,8 @@ def run_sweep(
     | None = None,
     emit_no_repair_baseline: bool = True,
     on_run_complete: Callable[[GroundingRun, int, int], None] | None = None,
+    run_sink: Callable[[GroundingRun], None] | None = None,
+    resume_dir: Path | str | None = None,
 ) -> RunSet:
     """Run the offline precompute sweep over a question bank against one reference.
 
@@ -229,16 +232,50 @@ def run_sweep(
     completes with signature ``(run, completed_count, total_count)``.  Default
     ``None`` -- no side-effects (existing callers and tests are unaffected).
 
+    ``run_sink``: optional callback invoked IMMEDIATELY after each run is produced
+    (before advancing to the next grounding), with signature ``(run,)``.  Called
+    for every run including FULL_NO_EDIT_RERUN baselines.  Invoked before
+    ``on_run_complete``.  Default ``None`` -- no side-effects.  Intended use:
+    persist each run to disk as soon as it is ready (crash-safe incremental writes).
+
+    ``resume_dir``: optional directory.  Before generating a given
+    (item, condition, sample_index), checks whether
+    ``<resume_dir>/<run_id>.json`` already exists.  If it does, loads it via
+    ``GroundingRun.model_validate_json`` and uses the loaded run INSTEAD of
+    calling the generator/verifier.  If the file exists but fails to parse, it
+    is treated as absent (run is regenerated).  ``run_sink`` and
+    ``on_run_complete`` are still invoked for loaded runs.  Applies to primary
+    runs and no-repair baselines alike.  Default ``None`` -- no files checked,
+    all runs generated fresh.
+
+    IMPORTANT -- resume assumes the same bank, reference, config, and
+    perturbations_for as the original run.  The run_id does NOT encode the
+    config; if any of these inputs change, delete the stale files before
+    resuming.
+
     Deterministic: same inputs -> equal RunSet (see module docstring).
     """
     cfg = config if config is not None else GroundingConfig()
     pert_fn = perturbations_for if perturbations_for is not None else default_perturbations_for
     conditions = list(conditions)
+    _resume_dir = Path(resume_dir) if resume_dir is not None else None
 
     # Build verifier-side components ONCE (the reference is immutable across the
     # whole sweep) -- avoids rebuilding the NetworkX graph / reloading the canon
     # per draw.
     components = build_components(reference, cfg)
+
+    def _try_load_run(run_id: str) -> GroundingRun | None:
+        """Return a GroundingRun loaded from _resume_dir/<run_id>.json, or None."""
+        if _resume_dir is None:
+            return None
+        path = _resume_dir / f"{run_id}.json"
+        if not path.exists():
+            return None
+        try:
+            return GroundingRun.model_validate_json(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 -- treat any parse error as absent
+            return None
 
     def _ground_one(
         item: QuestionBankItem,
@@ -290,9 +327,14 @@ def run_sweep(
         for condition in conditions:
             for sample_index in range(n_runs):
                 run_id = _run_id(item.item_id, condition, sample_index)
-                run = _ground_one(item, condition, sample_index, run_id, None)
+                loaded = _try_load_run(run_id)
+                run = loaded if loaded is not None else _ground_one(
+                    item, condition, sample_index, run_id, None
+                )
                 runs.append(run)
                 completed += 1
+                if run_sink is not None:
+                    run_sink(run)
                 if on_run_complete is not None:
                     on_run_complete(run, completed, _total_runs)
 
@@ -300,7 +342,8 @@ def run_sweep(
                 # FULL_NO_EDIT_RERUN was not itself an explicit condition.
                 if _emit_baseline and condition == Condition.FULL:
                     base_run_id = _run_id(item.item_id, Condition.FULL_NO_EDIT_RERUN, sample_index)
-                    baseline_run = _ground_one(
+                    loaded_base = _try_load_run(base_run_id)
+                    baseline_run = loaded_base if loaded_base is not None else _ground_one(
                         item,
                         Condition.FULL_NO_EDIT_RERUN,
                         sample_index,
@@ -309,6 +352,8 @@ def run_sweep(
                     )
                     runs.append(baseline_run)
                     completed += 1
+                    if run_sink is not None:
+                        run_sink(baseline_run)
                     if on_run_complete is not None:
                         on_run_complete(baseline_run, completed, _total_runs)
 
@@ -326,6 +371,24 @@ def run_sweep(
 # ---------------------------------------------------------------------------
 # Writer
 # ---------------------------------------------------------------------------
+
+
+def write_one_run(run: GroundingRun, out_dir: Path | str) -> Path:
+    """Write a single GroundingRun to ``<out_dir>/<run.run_id>.json``.
+
+    Creates ``out_dir`` if it does not exist.  Overwrites any existing file
+    (idempotent: the content is deterministic given the same run).  Returns
+    the written path.
+
+    This is the per-run sink primitive used for incremental crash-safe writes.
+    Pass it (or a wrapper) as the ``run_sink`` argument to ``run_sweep`` to
+    persist runs to disk immediately as they are produced.
+    """
+    target = Path(out_dir)
+    target.mkdir(parents=True, exist_ok=True)
+    path = target / f"{run.run_id}.json"
+    path.write_text(run.model_dump_json(indent=2), encoding="utf-8")
+    return path
 
 
 def write_runset(runset: RunSet, out_dir: Path | str | None = None) -> list[Path]:

@@ -82,6 +82,46 @@ The reported numbers in the paper come from THIS offline path.
 
 ---
 
+## Overnight n=20 run (crash-safe incremental mode)
+
+For the real 15-hour sweep on Apple Silicon, use this pattern so a crash or
+Ollama hiccup loses at most one in-flight grounding rather than the whole run.
+
+Each run file is written to data/runs/ IMMEDIATELY after it completes
+(incremental crash-safe writes).  Re-running the same command resumes
+automatically: completed (item, condition, sample) combinations are loaded from
+disk and skipped; only the remaining runs are generated.
+
+    # Keep the machine awake and the process alive after terminal close.
+    # IMPORTANT: keep Ollama running via the Ollama.app (menubar), NOT via
+    # a terminal 'ollama serve &' -- a terminal-launched server dies when the
+    # terminal closes, killing the sweep mid-run.
+    PYTHONUNBUFFERED=1 caffeinate -i nohup \
+        uv run python scripts/run_books_sweep.py --n-runs 20 \
+        > sweep.log 2>&1 &
+
+    echo "Sweep PID: $!"
+    tail -f sweep.log
+
+If interrupted, simply re-run the same command:
+
+    PYTHONUNBUFFERED=1 caffeinate -i nohup \
+        uv run python scripts/run_books_sweep.py --n-runs 20 \
+        > sweep.log 2>&1 &
+
+--resume is ON by default.  The sweep will skip all run files already present
+in data/runs/ and continue from where it left off.
+
+To monitor progress:
+
+    tail -f sweep.log
+
+To force a full regeneration (discard all existing run files):
+
+    uv run python scripts/run_books_sweep.py --n-runs 20 --no-resume
+
+---
+
 ## Step 3 -- RQ2 figure
 
 Produces the modality-contrast aggregate figure (INTERVENTIONAL_AGGREGATE stamp

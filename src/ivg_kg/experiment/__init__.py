@@ -48,6 +48,7 @@ from ivg_kg.experiment.sweep import (
     default_perturbations_for,
     run_sweep,
     sweep_seed,
+    write_one_run,
     write_runset,
 )
 
@@ -70,5 +71,6 @@ __all__ = [
     "run_section6_controls",
     "run_sweep",
     "sweep_seed",
+    "write_one_run",
     "write_runset",
 ]
