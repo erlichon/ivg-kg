@@ -15,7 +15,6 @@ from __future__ import annotations
 import math
 import os
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 import torch  # noqa: I001
@@ -198,17 +197,31 @@ class TestYesIdExtraction:
 # ---------------------------------------------------------------------------
 
 
-def _make_fake_generate_output(vocab_size: int, yes_ids: list[int], yes_logit: float = 5.0):
-    """Return a fake generate() output dict with .scores[0][0] set so yes-ids dominate."""
-    logits = torch.zeros(vocab_size, dtype=torch.float32)
+def _make_fake_forward_output(vocab_size: int, yes_ids: list[int], yes_logit: float = 5.0, seq_len: int = 4):
+    """Return a fake forward-pass output with .logits of shape [1, seq_len, vocab_size].
+
+    The last position [:, -1, :] has yes_ids set to yes_logit so they dominate.
+    This mirrors CausalLMOutputWithPast returned by model(input_ids=...).
+    """
+    logits = torch.zeros(1, seq_len, vocab_size, dtype=torch.float32)
     for i in yes_ids:
-        logits[i] = yes_logit
+        logits[0, -1, i] = yes_logit
 
-    class FakeGenerateOutput:
-        scores = (logits.unsqueeze(0),)  # scores[0][0] = logits
-        sequences = torch.zeros(1, 1, dtype=torch.long)
+    class FakeForwardOutput:
+        pass
 
-    return FakeGenerateOutput()
+    out = FakeForwardOutput()
+    out.logits = logits
+    return out
+
+
+def _make_fake_model(forward_output):
+    """Return a callable fake model that returns forward_output when called."""
+    class FakeModel:
+        def __call__(self, input_ids=None, **kwargs):
+            return forward_output
+
+    return FakeModel()
 
 
 class TestMiniCheckScorePlumbing:
@@ -258,10 +271,8 @@ class TestMiniCheckScorePlumbing:
         vocab_size = 50
         yes_id = 5
         tok, _ = self._build_stub_tokenizer(vocab_size=vocab_size, yes_ids=[yes_id])
-        fake_output = _make_fake_generate_output(vocab_size, [yes_id], yes_logit=8.0)
-
-        fake_model = MagicMock()
-        fake_model.generate.return_value = fake_output
+        fake_output = _make_fake_forward_output(vocab_size, [yes_id], yes_logit=8.0)
+        fake_model = _make_fake_model(fake_output)
         device = "cpu"
 
         monkeypatch.setattr(mod, "_load_minicheck_model", lambda _: (tok, fake_model, device))
@@ -278,10 +289,8 @@ class TestMiniCheckScorePlumbing:
         vocab_size = 50
         yes_id = 5
         tok, _ = self._build_stub_tokenizer(vocab_size=vocab_size, yes_ids=[yes_id])
-        fake_output = _make_fake_generate_output(vocab_size, [yes_id], yes_logit=20.0)
-
-        fake_model = MagicMock()
-        fake_model.generate.return_value = fake_output
+        fake_output = _make_fake_forward_output(vocab_size, [yes_id], yes_logit=20.0)
+        fake_model = _make_fake_model(fake_output)
 
         monkeypatch.setattr(mod, "_load_minicheck_model", lambda _: (tok, fake_model, "cpu"))
 
@@ -297,16 +306,17 @@ class TestMiniCheckScorePlumbing:
         yes_id = 5
         tok, _ = self._build_stub_tokenizer(vocab_size=vocab_size, yes_ids=[yes_id])
 
-        # Suppressed yes logit
-        logits = torch.ones(vocab_size, dtype=torch.float32) * 5.0
-        logits[yes_id] = -20.0
+        # Suppressed yes logit: all others high, yes-id very negative.
+        seq_len = 4
+        logits_3d = torch.ones(1, seq_len, vocab_size, dtype=torch.float32) * 5.0
+        logits_3d[0, -1, yes_id] = -20.0
 
         class FakeOutputLow:
-            scores = (logits.unsqueeze(0),)
-            sequences = torch.zeros(1, 1, dtype=torch.long)
+            pass
 
-        fake_model = MagicMock()
-        fake_model.generate.return_value = FakeOutputLow()
+        out = FakeOutputLow()
+        out.logits = logits_3d
+        fake_model = _make_fake_model(out)
 
         monkeypatch.setattr(mod, "_load_minicheck_model", lambda _: (tok, fake_model, "cpu"))
 
@@ -322,10 +332,8 @@ class TestMiniCheckScorePlumbing:
         vocab_size = 20
         yes_id = 3
         tok, captured = self._build_stub_tokenizer(vocab_size=vocab_size, yes_ids=[yes_id])
-        fake_output = _make_fake_generate_output(vocab_size, [yes_id])
-
-        fake_model = MagicMock()
-        fake_model.generate.return_value = fake_output
+        fake_output = _make_fake_forward_output(vocab_size, [yes_id])
+        fake_model = _make_fake_model(fake_output)
 
         monkeypatch.setattr(mod, "_load_minicheck_model", lambda _: (tok, fake_model, "cpu"))
 
@@ -347,10 +355,8 @@ class TestMiniCheckScorePlumbing:
         vocab_size = 20
         yes_id = 3
         tok, captured = self._build_stub_tokenizer(vocab_size=vocab_size, yes_ids=[yes_id])
-        fake_output = _make_fake_generate_output(vocab_size, [yes_id])
-
-        fake_model = MagicMock()
-        fake_model.generate.return_value = fake_output
+        fake_output = _make_fake_forward_output(vocab_size, [yes_id])
+        fake_model = _make_fake_model(fake_output)
 
         monkeypatch.setattr(mod, "_load_minicheck_model", lambda _: (tok, fake_model, "cpu"))
 
@@ -404,29 +410,37 @@ class TestMiniCheckScorePlumbing:
         assert score == 0.0
         assert not loaded, "Loader must not be called for empty hypothesis"
 
-    def test_model_generate_called_with_output_scores(self, monkeypatch):
-        """generate() must be called with output_scores=True and return_dict_in_generate=True."""
+    def test_model_called_with_input_ids_kwarg(self, monkeypatch):
+        """model must be called as model(input_ids=...) -- forward pass, not generate."""
         from ivg_kg.grounding import entailment as mod
 
         vocab_size = 20
         yes_id = 3
         tok, _ = self._build_stub_tokenizer(vocab_size=vocab_size, yes_ids=[yes_id])
-        fake_output = _make_fake_generate_output(vocab_size, [yes_id])
+        fake_output = _make_fake_forward_output(vocab_size, [yes_id])
 
-        fake_model = MagicMock()
-        fake_model.generate.return_value = fake_output
+        call_log = []
 
-        monkeypatch.setattr(mod, "_load_minicheck_model", lambda _: (tok, fake_model, "cpu"))
+        class TrackingModel:
+            def __call__(self, input_ids=None, **kwargs):
+                call_log.append({"input_ids": input_ids, "kwargs": kwargs})
+                return fake_output
+
+        monkeypatch.setattr(mod, "_load_minicheck_model", lambda _: (tok, TrackingModel(), "cpu"))
 
         gate = mod.MiniCheckEntailmentGate(model_id="stub")
         gate._score("The book was published in 1944.", "It was published in 1944.")
 
-        call_kwargs = fake_model.generate.call_args[1]
-        assert call_kwargs.get("output_scores") is True, "output_scores must be True"
-        assert call_kwargs.get("return_dict_in_generate") is True, "return_dict_in_generate must be True"
-        assert call_kwargs.get("do_sample") is False, "do_sample must be False (greedy)"
-        assert call_kwargs.get("max_new_tokens") == 1, "max_new_tokens must be 1"
-        assert call_kwargs.get("num_beams") == 1, "num_beams must be 1"
+        assert len(call_log) == 1, f"Model must be called exactly once, got {len(call_log)}"
+        call = call_log[0]
+        assert call["input_ids"] is not None, "input_ids must be passed to the model"
+        # Must be a 2-D tensor [1, seq_len]
+        assert call["input_ids"].ndim == 2, (
+            f"input_ids must be 2-D [1, seq_len], got shape {call['input_ids'].shape}"
+        )
+        assert call["input_ids"].shape[0] == 1, (
+            f"Batch dim must be 1, got {call['input_ids'].shape[0]}"
+        )
 
     def test_yes_id_cache_reused_on_second_call(self, monkeypatch):
         """Yes-token-id set is computed once and reused across _score calls on same instance."""
@@ -435,10 +449,8 @@ class TestMiniCheckScorePlumbing:
         vocab_size = 20
         yes_id = 3
         tok, _ = self._build_stub_tokenizer(vocab_size=vocab_size, yes_ids=[yes_id])
-        fake_output = _make_fake_generate_output(vocab_size, [yes_id])
-
-        fake_model = MagicMock()
-        fake_model.generate.return_value = fake_output
+        fake_output = _make_fake_forward_output(vocab_size, [yes_id])
+        fake_model = _make_fake_model(fake_output)
 
         monkeypatch.setattr(mod, "_load_minicheck_model", lambda _: (tok, fake_model, "cpu"))
 

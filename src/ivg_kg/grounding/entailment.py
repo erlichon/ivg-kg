@@ -464,11 +464,16 @@ class MiniCheckEntailmentGate(BaseEntailmentGate):
              with add_generation_prompt=True to obtain input_ids.  The chat
              template is REQUIRED because the model is chat-tuned; feeding a raw
              concatenated string yields incorrect results.
-          3. Greedy decode exactly one new token (max_new_tokens=1, do_sample=False,
-             num_beams=1) under torch.no_grad(), requesting per-step logits via
-             output_scores=True + return_dict_in_generate=True.
-          4. Take outputs.scores[0][0] (vocab-size 1-D tensor for the first and
-             only generated step).
+          3. Run a single forward pass under torch.no_grad() to obtain the
+             next-token logits directly from outputs.logits[0, -1, :].
+             NOTE: .generate() is NOT used here because InternLM2's remote code
+             under transformers 5.x does not inherit GenerationMixin and therefore
+             does not expose a .generate() method.  A forward pass is equivalent
+             for our purpose (reading the first generated token's logits) and
+             avoids this incompatibility entirely.
+          4. Take outputs.logits[0, -1, :] -- the vocab-size 1-D tensor of
+             next-token logits (what the model would produce as the first
+             generated token given the prompt).
           5. Softmax over the FULL vocabulary in float32.
           6. Sum the softmax probability mass on all single-token "yes"-variant
              ids ("Yes", "yes", " Yes", " yes") -- this is P(yes), the support
@@ -477,9 +482,9 @@ class MiniCheckEntailmentGate(BaseEntailmentGate):
         Value-sensitivity (Invariant #3): a wrong-value claim causes the model
         to answer "No", producing a low P(yes) -> FABRICATED signal.
 
-        Determinism: greedy (no sampling), fixed bf16 model state, pinned
-        input format.  Bit-stable within a run/machine; cross-machine relaxed
-        per the bfloat16 memory constraint (Invariants #8/#22).
+        Determinism: fixed bf16 model state, no sampling, pinned input format.
+        Bit-stable within a run/machine; cross-machine relaxed per the bfloat16
+        memory constraint (Invariants #8/#22).
 
         Empty premise or hypothesis short-circuits to 0.0 without model call.
         """
@@ -500,25 +505,21 @@ class MiniCheckEntailmentGate(BaseEntailmentGate):
 
         # apply_chat_template produces the full prompt string with special tokens
         # for the InternLM2 chat format and appends the generation-start marker.
+        # return_tensors="pt" gives a 2-D tensor of shape [1, seq_len].
         input_ids = self._tokenizer.apply_chat_template(
             messages,
             add_generation_prompt=True,
             return_tensors="pt",
-        ).to(self._device)
+        )
 
-        # Greedy single-token decode with logits returned.
+        # Single forward pass to read the next-token logits directly.
+        # outputs.logits has shape [1, seq_len, vocab_size]; the last position
+        # [-1, :] gives the distribution over the first generated token.
         with torch.no_grad():
-            outputs = self._model.generate(
-                input_ids,
-                max_new_tokens=1,
-                do_sample=False,
-                num_beams=1,
-                output_scores=True,
-                return_dict_in_generate=True,
-            )
+            outputs = self._model(input_ids=input_ids.to(self._device))
 
-        # First (and only) generated step's full-vocabulary logits.
-        first_step_logits = outputs.scores[0][0]
+        # Next-token logits: 1-D tensor of shape (vocab_size,).
+        first_step_logits = outputs.logits[0, -1, :]
 
         # Compute and cache the yes-variant token-id set on first _score() call.
         if self._yes_token_ids is None:
