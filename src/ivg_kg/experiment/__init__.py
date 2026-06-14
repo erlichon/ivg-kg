@@ -17,8 +17,10 @@ run_sweep           -- GR11 offline precompute sweep harness
 sweep_seed          -- deterministic per-draw seed scheme
 default_perturbations_for -- books-spine condition -> perturbation mapping
 write_runset        -- write RunSet runs to data/runs/
+manifest_perturbations_for -- EX2 manifest-driven condition -> perturbation adapter
 """
 
+from ivg_kg.experiment.ablation import manifest_perturbations_for
 from ivg_kg.experiment.gold_qa import GoldQAItem, GoldQASet, load_gold_qa_set
 from ivg_kg.experiment.question_bank import (
     QuestionBank,
@@ -42,6 +44,7 @@ __all__ = [
     "load_question_bank",
     "RunSet",
     "default_perturbations_for",
+    "manifest_perturbations_for",
     "run_sweep",
     "sweep_seed",
     "write_runset",
