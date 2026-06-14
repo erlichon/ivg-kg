@@ -360,7 +360,7 @@ def _load_minicheck_model(model_id: str) -> Any:  # pragma: no cover
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         trust_remote_code=True,
-        dtype=torch.bfloat16,
+        torch_dtype=torch.bfloat16,  # transformers 4.x kwarg (pinned <4.50)
     )
     model.eval()
     if torch.backends.mps.is_available():
@@ -503,20 +503,28 @@ class MiniCheckEntailmentGate(BaseEntailmentGate):
             {"role": "user", "content": user_prompt},
         ]
 
-        # apply_chat_template produces the full prompt string with special tokens
-        # for the InternLM2 chat format and appends the generation-start marker.
-        # return_tensors="pt" gives a 2-D tensor of shape [1, seq_len].
-        input_ids = self._tokenizer.apply_chat_template(
+        # apply_chat_template produces the full prompt with the InternLM2 chat
+        # special tokens and appends the generation-start marker.
+        # transformers 5.x returns a BatchEncoding (dict-like) here; older
+        # versions return a bare 2-D tensor [1, seq_len]. Handle both: extract
+        # the input_ids tensor whatever the container.
+        encoded = self._tokenizer.apply_chat_template(
             messages,
             add_generation_prompt=True,
             return_tensors="pt",
         )
+        if hasattr(encoded, "input_ids"):
+            input_ids = encoded.input_ids
+        elif isinstance(encoded, dict):
+            input_ids = encoded["input_ids"]
+        else:
+            input_ids = encoded
 
         # Single forward pass to read the next-token logits directly.
         # outputs.logits has shape [1, seq_len, vocab_size]; the last position
         # [-1, :] gives the distribution over the first generated token.
         with torch.no_grad():
-            outputs = self._model(input_ids=input_ids.to(self._device))
+            outputs = self._model(input_ids=input_ids.to(self._device), use_cache=False)
 
         # Next-token logits: 1-D tensor of shape (vocab_size,).
         first_step_logits = outputs.logits[0, -1, :]

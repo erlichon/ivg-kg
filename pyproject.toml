@@ -24,9 +24,15 @@ data = [
     "WikibaseIntegrator>=0.12.9",
 ]
 grounding = [
-    "transformers>=4.48.0",
+    # MiniCheck-7B (InternLM2) ships transformers-4.x-era remote modeling code:
+    # it relies on PreTrainedModel inheriting GenerationMixin and on
+    # DynamicCache.from_legacy_cache, both removed by transformers 4.50/5.x.
+    # On >=4.50 the model loads but its forward produces silently-wrong
+    # (non-value-sensitive) logits, so pin below 4.50 for a correct verifier.
+    "transformers>=4.48.0,<4.50",
     "torch>=2.5.1",
     "einops>=0.8.0",
+    "sentencepiece>=0.2.0",
 ]
 dev = [
     "pytest>=8.3.4",
