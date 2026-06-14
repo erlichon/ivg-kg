@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -164,6 +165,29 @@ def build_books_sweep(
     # --- Build manifest-driven perturbations adapter -------------------------
     adapter = manifest_perturbations_for(manifest)
 
+    # --- Progress callback ---------------------------------------------------
+    _sweep_start = time.monotonic()
+
+    def _on_run_complete(run, completed: int, total: int) -> None:
+        elapsed = time.monotonic() - _sweep_start
+        eta_s = (elapsed / completed) * (total - completed) if completed else 0.0
+        # Compact status summary: count each ClaimStatus value in the run.
+        status_counts: dict[str, int] = {}
+        for claim in run.claims:
+            k = claim.status.value
+            status_counts[k] = status_counts.get(k, 0) + 1
+        counts_str = " ".join(f"{k}={v}" for k, v in sorted(status_counts.items()))
+        parts = run.run_id.split("--")
+        item_id = parts[0] if parts else run.run_id
+        condition = parts[1] if len(parts) > 1 else ""
+        sample = parts[2] if len(parts) > 2 else ""
+        print(
+            f"[{completed}/{total}] {item_id} {condition} {sample}"
+            f" -> {counts_str}"
+            f"  elapsed={elapsed:.1f}s  eta={eta_s:.1f}s",
+            flush=True,
+        )
+
     # --- Run the sweep -------------------------------------------------------
     runset = run_sweep(
         bank,
@@ -178,6 +202,7 @@ def build_books_sweep(
         config=config,
         perturbations_for=adapter,
         emit_no_repair_baseline=True,
+        on_run_complete=_on_run_complete,
     )
 
     # --- Write runs ----------------------------------------------------------

@@ -104,6 +104,15 @@ class BaseEntailmentGate(ABC):
         self._cache[key] = score
         return score
 
+    def entails_batch(self, pairs: list[tuple[str, str]]) -> list[float]:
+        """Score many (premise, hypothesis) pairs.
+
+        Default implementation: per-pair via entails() (preserves the cache).
+        Subclasses MAY override with a true batched forward.
+        Order of returned scores matches ``pairs``.
+        """
+        return [self.entails(p, h) for (p, h) in pairs]
+
     @abstractmethod
     def _score(self, premise: str, hypothesis: str) -> float:
         """Compute the raw entailment score without caching.
@@ -306,6 +315,13 @@ def _yes_token_ids_for_tokenizer(tokenizer: Any) -> list[int]:
                 ids.append(tok_id)
     return ids
 
+
+# ---------------------------------------------------------------------------
+# MiniCheck batched forward: max pairs per single GPU/MPS forward pass.
+# Bounds peak memory on Apple Silicon. Increase if the device has headroom.
+# ---------------------------------------------------------------------------
+
+MINICHECK_BATCH_SIZE: int = 8
 
 # ---------------------------------------------------------------------------
 # Lazy loader stubs -- replaced by actual loaders inside the concrete gates.
@@ -535,6 +551,110 @@ class MiniCheckEntailmentGate(BaseEntailmentGate):
 
         # P(yes) = sum of softmax(full vocab logits) at all yes-variant ids.
         return _yes_prob_from_logits(first_step_logits, self._yes_token_ids)
+
+    def entails_batch(self, pairs: list[tuple[str, str]]) -> list[float]:  # pragma: no cover
+        """Score many (premise, hypothesis) pairs with batched forwards.
+
+        For each pair builds the same canonical two-turn chat prompt used by
+        _score(), consults the evidence-pair cache to skip already-scored pairs,
+        then runs at most MINICHECK_BATCH_SIZE uncached pairs per forward pass.
+
+        Left-padding is used (tokenizer.padding_side = "left") so the last
+        real token of every row is always at position -1, which makes logit
+        extraction uniform: ``outputs.logits[row, -1, :]``.
+
+        Empty premise or hypothesis short-circuits to 0.0 for that pair (no
+        forward pass), matching the _score() contract.
+
+        The returned list is in the SAME ORDER as ``pairs``.
+        """
+        import torch  # noqa: PLC0415 -- intentionally lazy
+
+        if not pairs:
+            return []
+
+        # Ensure model is loaded.
+        if self._tokenizer is None or self._model is None:
+            self._tokenizer, self._model, self._device = _load_minicheck_model(self._model_id)
+
+        # Compute and cache yes-token-ids once.
+        if self._yes_token_ids is None:
+            self._yes_token_ids = _yes_token_ids_for_tokenizer(self._tokenizer)
+
+        # Use left-padding so the last token of every row in the batch is at
+        # position -1 regardless of sequence length differences.
+        original_padding_side = getattr(self._tokenizer, "padding_side", "right")
+        self._tokenizer.padding_side = "left"
+        # Ensure a pad token is defined (required by the tokenizer padder).
+        if self._tokenizer.pad_token is None:
+            self._tokenizer.pad_token = self._tokenizer.eos_token
+
+        try:
+            results: list[float] = [0.0] * len(pairs)
+
+            # Partition into cached (immediate) and uncached (need forward).
+            uncached_indices: list[int] = []
+            uncached_prompts: list[str] = []
+
+            for idx, (premise, hypothesis) in enumerate(pairs):
+                if not premise or not hypothesis:
+                    results[idx] = 0.0
+                    continue
+                key = (premise, hypothesis)
+                if key in self._cache:
+                    results[idx] = self._cache[key]
+                    continue
+                # Build the canonical chat string for this uncached pair.
+                user_prompt = f"Document: {premise}\nClaim: {hypothesis}"
+                messages = [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ]
+                # apply_chat_template with return_type="str" gives a plain string.
+                prompt_str = self._tokenizer.apply_chat_template(
+                    messages,
+                    add_generation_prompt=True,
+                    tokenize=False,
+                )
+                uncached_indices.append(idx)
+                uncached_prompts.append(prompt_str)
+
+            # Process uncached pairs in chunks of MINICHECK_BATCH_SIZE.
+            for chunk_start in range(0, len(uncached_prompts), MINICHECK_BATCH_SIZE):
+                chunk_prompts = uncached_prompts[chunk_start : chunk_start + MINICHECK_BATCH_SIZE]
+                chunk_indices = uncached_indices[chunk_start : chunk_start + MINICHECK_BATCH_SIZE]
+
+                # Tokenize the whole chunk with padding.
+                encoded = self._tokenizer(
+                    chunk_prompts,
+                    padding=True,
+                    return_tensors="pt",
+                )
+                input_ids = encoded["input_ids"].to(self._device)
+                attention_mask = encoded["attention_mask"].to(self._device)
+
+                with torch.no_grad():
+                    outputs = self._model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        use_cache=False,
+                    )
+
+                # outputs.logits: [batch, seq_len, vocab_size]
+                # With left-padding the last real position is always index -1.
+                for row, orig_idx in enumerate(chunk_indices):
+                    logits_last = outputs.logits[row, -1, :]
+                    score = _yes_prob_from_logits(logits_last, self._yes_token_ids)
+                    results[orig_idx] = score
+                    # Store in the shared cache so future entails() calls hit cache.
+                    premise, hypothesis = pairs[orig_idx]
+                    self._cache[(premise, hypothesis)] = score
+
+        finally:
+            # Restore original padding side so single-pair _score is unaffected.
+            self._tokenizer.padding_side = original_padding_side
+
+        return results
 
 
 # ---------------------------------------------------------------------------

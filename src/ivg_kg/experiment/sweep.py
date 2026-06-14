@@ -206,6 +206,7 @@ def run_sweep(
     perturbations_for: Callable[[QuestionBankItem, Condition, GradingReference], list[Perturbation]]
     | None = None,
     emit_no_repair_baseline: bool = True,
+    on_run_complete: Callable[[GroundingRun, int, int], None] | None = None,
 ) -> RunSet:
     """Run the offline precompute sweep over a question bank against one reference.
 
@@ -223,6 +224,10 @@ def run_sweep(
     The verifier-side pipeline components (linker, canon, gate -> classifier, and
     the extractor) are built ONCE here and reused across every draw, since the
     reference is immutable for the whole sweep.
+
+    ``on_run_complete``: optional progress callback invoked after each grounding
+    completes with signature ``(run, completed_count, total_count)``.  Default
+    ``None`` -- no side-effects (existing callers and tests are unaffected).
 
     Deterministic: same inputs -> equal RunSet (see module docstring).
     """
@@ -269,30 +274,43 @@ def run_sweep(
             }
         )
 
+    # Pre-compute total run count for the progress callback (if supplied).
+    # Each (item, condition, sample) primary run may also emit a no-repair
+    # baseline run -- count them up-front so the callback receives an accurate
+    # denominator without look-ahead.
+    _emit_baseline = emit_no_repair_baseline and Condition.FULL_NO_EDIT_RERUN not in conditions
+    _full_in_conditions = Condition.FULL in conditions
+    _baseline_per_item = n_runs if (_emit_baseline and _full_in_conditions) else 0
+    _primary_per_item = n_runs * len(conditions)
+    _total_runs = len(bank.items) * (_primary_per_item + _baseline_per_item)
+
     runs: list[GroundingRun] = []
+    completed = 0
     for item in bank.items:
         for condition in conditions:
             for sample_index in range(n_runs):
                 run_id = _run_id(item.item_id, condition, sample_index)
-                runs.append(_ground_one(item, condition, sample_index, run_id, None))
+                run = _ground_one(item, condition, sample_index, run_id, None)
+                runs.append(run)
+                completed += 1
+                if on_run_complete is not None:
+                    on_run_complete(run, completed, _total_runs)
 
                 # Matched no-repair baseline: only for FULL runs, and only when
                 # FULL_NO_EDIT_RERUN was not itself an explicit condition.
-                if (
-                    emit_no_repair_baseline
-                    and condition == Condition.FULL
-                    and Condition.FULL_NO_EDIT_RERUN not in conditions
-                ):
+                if _emit_baseline and condition == Condition.FULL:
                     base_run_id = _run_id(item.item_id, Condition.FULL_NO_EDIT_RERUN, sample_index)
-                    runs.append(
-                        _ground_one(
-                            item,
-                            Condition.FULL_NO_EDIT_RERUN,
-                            sample_index,
-                            base_run_id,
-                            run_id,
-                        )
+                    baseline_run = _ground_one(
+                        item,
+                        Condition.FULL_NO_EDIT_RERUN,
+                        sample_index,
+                        base_run_id,
+                        run_id,
                     )
+                    runs.append(baseline_run)
+                    completed += 1
+                    if on_run_complete is not None:
+                        on_run_complete(baseline_run, completed, _total_runs)
 
     sweep_id = f"sweep:{bank.bank_id}:{bank.slice_id}"
     return RunSet(

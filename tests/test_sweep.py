@@ -778,5 +778,129 @@ class TestRunSetGet:
         assert rs.get("qb-1", Condition.CONTENT_ABSENT, 0) is None
 
 
+# ---------------------------------------------------------------------------
+# 12. on_run_complete callback
+# ---------------------------------------------------------------------------
+
+
+class TestOnRunCompleteCallback:
+    def test_callback_invoked_once_per_run(self) -> None:
+        """on_run_complete is called exactly once per produced GroundingRun."""
+        from ivg_kg.experiment.sweep import run_sweep
+
+        bank = _make_bank()
+        ref = _make_reference()
+        calls: list[tuple[Any, int, int]] = []
+
+        def _cb(run: Any, completed: int, total: int) -> None:
+            calls.append((run, completed, total))
+
+        rs = run_sweep(
+            bank,
+            ref,
+            _StubClient(),
+            conditions=[Condition.FULL, Condition.CONTENT_ABSENT],
+            n_runs=2,
+            config=_config(),
+            emit_no_repair_baseline=False,
+            on_run_complete=_cb,
+        )
+        assert len(calls) == len(rs.runs), (
+            f"callback called {len(calls)} times but {len(rs.runs)} runs produced"
+        )
+
+    def test_callback_completed_count_monotonic(self) -> None:
+        """completed_count passed to callback is strictly increasing from 1."""
+        from ivg_kg.experiment.sweep import run_sweep
+
+        bank = _make_bank()
+        ref = _make_reference()
+        counts: list[int] = []
+
+        def _cb(run: Any, completed: int, total: int) -> None:
+            counts.append(completed)
+
+        run_sweep(
+            bank,
+            ref,
+            _StubClient(),
+            conditions=[Condition.FULL],
+            n_runs=3,
+            config=_config(),
+            emit_no_repair_baseline=False,
+            on_run_complete=_cb,
+        )
+        assert counts == sorted(set(counts)), "completed counts must be monotonically increasing"
+        assert counts[0] == 1, "first completed count must be 1"
+
+    def test_callback_total_matches_run_count(self) -> None:
+        """total passed to callback equals the total number of runs produced."""
+        from ivg_kg.experiment.sweep import run_sweep
+
+        bank = _make_bank()
+        ref = _make_reference()
+        totals: list[int] = []
+
+        def _cb(run: Any, completed: int, total: int) -> None:
+            totals.append(total)
+
+        rs = run_sweep(
+            bank,
+            ref,
+            _StubClient(),
+            conditions=[Condition.FULL, Condition.CONTENT_ABSENT],
+            n_runs=2,
+            config=_config(),
+            emit_no_repair_baseline=False,
+            on_run_complete=_cb,
+        )
+        # Every invocation receives the same total.
+        assert len(set(totals)) == 1
+        assert totals[0] == len(rs.runs)
+
+    def test_callback_none_unchanged_behavior(self) -> None:
+        """Default on_run_complete=None produces same RunSet as before."""
+        from ivg_kg.experiment.sweep import run_sweep
+
+        bank = _make_bank()
+        ref = _make_reference()
+        rs = run_sweep(
+            bank,
+            ref,
+            _StubClient(),
+            conditions=[Condition.FULL],
+            n_runs=2,
+            config=_config(),
+            emit_no_repair_baseline=False,
+        )
+        # No error, normal run count.
+        assert len(rs.runs) == 2 * len(bank.items)
+
+    def test_callback_with_baseline_counts_include_baselines(self) -> None:
+        """With emit_no_repair_baseline=True the callback counts include baselines."""
+        from ivg_kg.experiment.sweep import run_sweep
+
+        bank = _make_bank()
+        ref = _make_reference()
+        calls: list[tuple[Any, int, int]] = []
+
+        def _cb(run: Any, completed: int, total: int) -> None:
+            calls.append((run, completed, total))
+
+        rs = run_sweep(
+            bank,
+            ref,
+            _StubClient(),
+            conditions=[Condition.FULL],
+            n_runs=2,
+            config=_config(),
+            emit_no_repair_baseline=True,
+            on_run_complete=_cb,
+        )
+        assert len(calls) == len(rs.runs)
+        totals = [t for _, _, t in calls]
+        assert set(totals) == {len(rs.runs)}
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -275,10 +275,19 @@ class Classifier:
         The returned list is in deterministic order: endpoint pairs are sorted,
         and within each pair all_simple_paths yield order is preserved (then the
         caller's argmax + tuple tie-break selects the single best when needed).
+
+        All candidate path premises are scored in one entails_batch() call so
+        that MiniCheckEntailmentGate can issue a single batched forward per
+        multi-hop stage invocation.  The filter (> tau) and result order are
+        identical to the previous per-path loop.
         """
         effective_tau = self._config.tau if tau is None else tau
         k_hops = self._config.k_hops
-        results: list[tuple[float, list[str], GroundingPath]] = []
+
+        # Collect all valid candidate paths (node_path + pre-built GroundingPath)
+        # before scoring.  The path enumeration order is identical to the original
+        # loop so the argmax + lex tie-break in the caller is unaffected.
+        candidates: list[tuple[list[str], GroundingPath, str]] = []
 
         nodes = sorted(endpoints)
         for i, src in enumerate(nodes):
@@ -299,34 +308,60 @@ class Classifier:
                     if path_edges is None:
                         continue
                     premise = _serialise_path(path_edges)
-                    score = self._gate.entails(premise, claim_text)
-                    if score > effective_tau:
-                        results.append(
-                            (score, list(node_path), GroundingPath(edges=path_edges, node_ids=list(node_path)))
-                        )
+                    candidates.append(
+                        (list(node_path), GroundingPath(edges=path_edges, node_ids=list(node_path)), premise)
+                    )
+
+        if not candidates:
+            return []
+
+        # Score all candidate premises in one batch call.
+        pairs = [(premise, claim_text) for (_, _, premise) in candidates]
+        scores = self._gate.entails_batch(pairs)
+
+        results: list[tuple[float, list[str], GroundingPath]] = []
+        for (node_path, grounding_path, _premise), score in zip(candidates, scores, strict=False):
+            if score > effective_tau:
+                results.append((score, node_path, grounding_path))
 
         return results
 
     # -- cascade stages ---------------------------------------------------
 
     def _best_direct_triple(self, claim_text: str) -> tuple[float, KGEdge | None]:
-        """Max gate score over all snapshot edges; ties keep the first in order."""
+        """Max gate score over all snapshot edges; ties keep the first in order.
+
+        Scores all edges in one entails_batch() call (one forward per stage),
+        then takes the argmax.  Ties keep the first edge in snapshot order,
+        which matches the previous per-edge loop tie-break semantics exactly.
+        """
+        edges = self._reference.snapshot.edges
+        if not edges:
+            return 0.0, None
+        premises = [_serialise_edge(e, self._node_labels) for e in edges]
+        pairs = [(p, claim_text) for p in premises]
+        scores = self._gate.entails_batch(pairs)
         best_score = 0.0
         best_edge: KGEdge | None = None
-        for edge in self._reference.snapshot.edges:
-            premise = _serialise_edge(edge, self._node_labels)
-            score = self._gate.entails(premise, claim_text)
+        for edge, score in zip(edges, scores, strict=False):
             if score > best_score:
                 best_score = score
                 best_edge = edge
         return best_score, best_edge
 
     def _best_content_label(self, claim_text: str) -> tuple[float, ContentLabel | None]:
-        """Max gate score over all content labels; ties keep the first in order."""
+        """Max gate score over all content labels; ties keep the first in order.
+
+        Scores all labels in one entails_batch() call, then takes the argmax.
+        """
+        labels = self._reference.content_labels
+        if not labels:
+            return 0.0, None
+        pairs = [(cl.fact, claim_text) for cl in labels]
+        scores = self._gate.entails_batch(pairs)
         best_score = 0.0
         best_label: ContentLabel | None = None
-        for cl in self._reference.content_labels:
-            score = self._gate.entails(cl.fact, claim_text)
+        for cl, score in zip(labels, scores, strict=False):
             if score > best_score:
                 best_score = score
                 best_label = cl

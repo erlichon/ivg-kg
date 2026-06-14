@@ -396,6 +396,102 @@ def test_slice_entails_passes_on_correct_value():
 # Module-level: no top-level transformers/torch import
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# entails_batch: BaseEntailmentGate default loop and LexicalEntailmentGate exact
+# ---------------------------------------------------------------------------
+
+
+def test_entails_batch_default_loop_order_preserved():
+    """Default entails_batch returns scores in the same order as pairs."""
+    from ivg_kg.grounding.entailment import LexicalEntailmentGate
+
+    gate = LexicalEntailmentGate()
+    pairs = [
+        ("Tennessee Williams wrote The Glass Menagerie", "Tennessee Williams wrote The Glass Menagerie"),
+        ("apple orange banana", "umbrella quantum matrix"),
+        ("Hamlet is a play by Shakespeare 1603", "Hamlet was written in 1603."),
+    ]
+    batch = gate.entails_batch(pairs)
+    individual = [gate.entails(p, h) for p, h in pairs]
+    assert batch == individual, f"batch={batch} individual={individual}"
+
+
+def test_entails_batch_exact_equality_lexical():
+    """LexicalEntailmentGate.entails_batch == [entails(p,h) for p,h] (exact)."""
+    from ivg_kg.grounding.entailment import LexicalEntailmentGate
+
+    gate = LexicalEntailmentGate()
+    pairs = [
+        ("The Glass Menagerie date of first performance 1944", "The Glass Menagerie was first performed in 1960."),
+        ("Carl Menger Principles of Economics Vienna 1871", "Principles of Economics was published in Berlin in 1850."),
+        ("Beloved written by Toni Morrison", "Beloved written by Toni Morrison"),
+    ]
+    assert gate.entails_batch(pairs) == [gate.entails(p, h) for p, h in pairs]
+
+
+def test_entails_batch_empty_list():
+    """entails_batch([]) returns []."""
+    from ivg_kg.grounding.entailment import LexicalEntailmentGate
+
+    gate = LexicalEntailmentGate()
+    assert gate.entails_batch([]) == []
+
+
+def test_entails_batch_cache_hit():
+    """entails_batch serves already-cached pairs from cache (no re-scoring)."""
+    from ivg_kg.grounding.entailment import LexicalEntailmentGate
+
+    call_count = 0
+    original_score = LexicalEntailmentGate._score
+
+    class InstrumentedGate(LexicalEntailmentGate):
+        def _score(self, premise: str, hypothesis: str) -> float:
+            nonlocal call_count
+            call_count += 1
+            return original_score(self, premise, hypothesis)
+
+    gate = InstrumentedGate()
+    p, h = "Tennessee Williams premiere 1944", "premiere 1944"
+    # Prime the cache.
+    gate.entails(p, h)
+    count_after_prime = call_count
+    # Now call via batch -- should hit cache, not re-invoke _score.
+    result = gate.entails_batch([(p, h)])
+    assert call_count == count_after_prime, "entails_batch must use cache"
+    assert result == [gate.entails(p, h)]
+
+
+def test_entails_batch_default_subclass_loop():
+    """A subclass that only implements _score gets working entails_batch via the default."""
+    from ivg_kg.grounding.entailment import BaseEntailmentGate
+
+    scored: list[tuple[str, str]] = []
+
+    class _MinimalGate(BaseEntailmentGate):
+        def _score(self, premise: str, hypothesis: str) -> float:
+            scored.append((premise, hypothesis))
+            return 0.5
+
+    gate = _MinimalGate()
+    pairs = [("a", "b"), ("c", "d")]
+    results = gate.entails_batch(pairs)
+    assert results == [0.5, 0.5]
+    # _score must be called once per distinct pair (cache primed on first call).
+    assert len(scored) == 2
+
+
+def test_minicheck_entails_batch_method_exists():
+    """MiniCheckEntailmentGate exposes an entails_batch method."""
+    from ivg_kg.grounding.entailment import MiniCheckEntailmentGate
+
+    assert hasattr(MiniCheckEntailmentGate, "entails_batch")
+    assert callable(MiniCheckEntailmentGate.entails_batch)
+
+
+# ---------------------------------------------------------------------------
+# Module-level: no top-level transformers/torch import
+# ---------------------------------------------------------------------------
+
 def test_entailment_module_imports_without_transformers():
     """The entailment module must import cleanly even when transformers is absent.
 
