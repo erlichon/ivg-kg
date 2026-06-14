@@ -13,25 +13,33 @@ and a value-swapped adversarial negative (the section-6 control). Every
 expected_outcome was verified to grade as written under the offline lexical
 gate before being committed; the script asserts assert_complete() passes.
 
-The reliability report is built with entailment="lexical" -- the model-free
-deterministic gate -- so it carries calibrated=false / gate="lexical": HONEST
-demo data, NOT a calibrated deployment number. The real deployment report uses
-entailment="minicheck" (calibrated=true), produced offline with the model.
+TWO PATHS:
 
-The whole path (lexical gate, label-alias linker) is deterministic, so running
-this script twice produces byte-identical output files.
+  --gate lexical  (DEFAULT): model-free deterministic gate; no torch, no
+    download; calibrated=false. Used for CI / committed demo artifacts.
+    Running with the default produces byte-identical reliability_report.json
+    on every run (the committed demo report).
+
+  --gate minicheck: offline MiniCheck-7B (bespokelabs/Bespoke-MiniCheck-7B);
+    requires uv sync --extra grounding and torch+transformers. Produces
+    calibrated=true / gate="minicheck". Run this on the Apple-Silicon machine
+    (after ollama pull qwen2.5) to produce the DEPLOYMENT-TRUST report whose
+    frozen_tau becomes the M-BOOKS operating point.
 
 Usage:
-    uv run python scripts/emit_calibration_report.py
+    uv run python scripts/emit_calibration_report.py               # lexical (demo)
+    uv run python scripts/emit_calibration_report.py --gate minicheck  # real calibration
 """
 
 from __future__ import annotations
 
+import argparse
+import sys
 from pathlib import Path
 
 from ivg_kg.data.graph_store import load_snapshot
 from ivg_kg.data.reference import assemble_reference, author_books_content_labels
-from ivg_kg.experiment.calibration import build_reliability_report
+from ivg_kg.experiment.calibration import CalibrationReport, build_reliability_report
 from ivg_kg.experiment.gold_qa import (
     ExpectedClaimOutcome,
     GoldFold,
@@ -42,19 +50,11 @@ from ivg_kg.schema import ClaimStatus, GroundingConfig, Modality
 
 _SLICE_DIR = Path(__file__).parent.parent / "data" / "frozen" / "books" / "books-p0-v1"
 
-# Offline deterministic gate. tau=0.4 is the PRE-CALIBRATION seed used when no
-# tau_candidates are supplied (the no-candidates path). When tau_candidates is
-# passed to build_reliability_report, calibrate_tau sweeps those candidates on
-# the CALIBRATION fold and freezes the actual operating point (0.2 on the
-# books-p0-v1 fold, visible as frozen_tau:0.2 in the emitted report). The
-# model-gate sweep (GR11) selects its own tau and does NOT inherit 0.4.
-_CONFIG = GroundingConfig(
-    k_hops=2,
-    tau=0.4,
-    entailment="lexical",
-    linker="label_alias",
-    extractor="rule_based",
-)
+# Pre-calibration tau seed (used as base config tau before calibrate_tau sweeps
+# candidates). calibrate_tau freezes the actual operating point on the
+# CALIBRATION fold (0.2 for the lexical gate on books-p0-v1). The model-gate
+# sweep selects its own tau and does NOT inherit this default.
+_BASE_TAU: float = 0.4
 
 # Candidate taus swept on the CALIBRATION fold to freeze the operating point.
 _TAU_CANDIDATES = [0.2, 0.3, 0.4, 0.5, 0.6]
@@ -187,19 +187,85 @@ def build_reference():
     return assemble_reference(snapshot, content)
 
 
-def main() -> None:
+def build_report(gate: str = "lexical") -> CalibrationReport:
+    """Build and return the reliability report for the given gate.
+
+    Parameters
+    ----------
+    gate:
+        Entailment selector: "lexical" (default, model-free, calibrated=False)
+        or "minicheck" (MiniCheck-7B, calibrated=True; requires torch+transformers).
+
+    Returns
+    -------
+    CalibrationReport
+        The frozen reliability report (not written to disk here).
+    """
+    gold = build_gold_set()
+    reference = build_reference()
+
+    config = GroundingConfig(
+        k_hops=2,
+        tau=_BASE_TAU,
+        entailment=gate,
+        linker="label_alias",
+        extractor="rule_based",
+    )
+
+    return build_reliability_report(
+        gold, reference, config=config, tau_candidates=_TAU_CANDIDATES
+    )
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Emit the books gold-QA set and reliability report (GR10). "
+            "Default gate is 'lexical' (model-free, calibrated=False, CI-safe). "
+            "Use --gate minicheck on the Apple-Silicon machine to produce the "
+            "DEPLOYMENT-TRUST report (calibrated=True)."
+        )
+    )
+    parser.add_argument(
+        "--gate",
+        choices=["lexical", "minicheck"],
+        default="lexical",
+        help=(
+            "Entailment gate. 'lexical' = model-free Jaccard (default; calibrated=False). "
+            "'minicheck' = MiniCheck-7B offline (calibrated=True; requires "
+            "uv sync --extra grounding and torch+transformers on Apple-Silicon)."
+        ),
+    )
+    args = parser.parse_args(argv)
+
     gold = build_gold_set()
     reference = build_reference()
 
     # Persist the gold set (promotes the thin .stub.json to a richer committed set).
     (_SLICE_DIR / "gold_qa.json").write_text(gold.to_json() + "\n", encoding="utf-8")
 
-    # Freeze tau on the calibration fold; report on the sweep fold.
-    report = build_reliability_report(
-        gold, reference, config=_CONFIG, tau_candidates=_TAU_CANDIDATES
+    config = GroundingConfig(
+        k_hops=2,
+        tau=_BASE_TAU,
+        entailment=args.gate,
+        linker="label_alias",
+        extractor="rule_based",
     )
-    assert report.calibrated is False  # lexical gate -> demo/uncalibrated
-    assert report.gate == "lexical"
+
+    report = build_reliability_report(
+        gold, reference, config=config, tau_candidates=_TAU_CANDIDATES
+    )
+
+    if args.gate == "lexical":
+        assert report.calibrated is False, (
+            f"Expected calibrated=False for lexical gate, got {report.calibrated}"
+        )
+        assert report.gate == "lexical", f"Expected gate='lexical', got {report.gate!r}"
+    elif args.gate == "minicheck":
+        assert report.calibrated is True, (
+            f"Expected calibrated=True for minicheck gate, got {report.calibrated}"
+        )
+        assert report.gate == "minicheck", f"Expected gate='minicheck', got {report.gate!r}"
 
     (_SLICE_DIR / "reliability_report.json").write_text(
         report.model_dump_json(indent=2) + "\n", encoding="utf-8"
@@ -208,6 +274,7 @@ def main() -> None:
     print(f"wrote {_SLICE_DIR / 'gold_qa.json'}")
     print(f"wrote {_SLICE_DIR / 'reliability_report.json'}")
     print(
+        f"gate={report.gate} calibrated={report.calibrated} "
         f"frozen_tau={report.frozen_tau} frozen_k={report.frozen_k} "
         f"overall_error_rate={report.overall_error_rate:.3f} "
         f"n_items={report.n_items} n_claims={report.n_claims}"
@@ -215,4 +282,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
