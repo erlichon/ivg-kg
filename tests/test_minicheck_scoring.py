@@ -579,3 +579,65 @@ class TestMiniCheckIntegration:
         assert score_correct > score_wrong, (
             f"Correct claim ({score_correct:.3f}) must beat wrong-value claim ({score_wrong:.3f})"
         )
+
+
+@pytest.mark.skipif(
+    not (os.environ.get("IVG_KG_RUN_MINICHECK") == "1"),
+    reason="Real MiniCheck-7B tokenizer/forward; set IVG_KG_RUN_MINICHECK=1 to run",
+)
+class TestMiniCheckBatchRegression:
+    """Regression guards for entails_batch (the path the offline sweep uses).
+
+    Catches the doubled-BOS bug: the batch path renders the chat template with
+    tokenize=False then re-tokenizes; that re-tokenize MUST pass
+    add_special_tokens=False, else TemplateProcessing prepends a SECOND BOS and
+    batched scores diverge from the canonical single-pair _score path.
+    """
+
+    def _messages(self, premise, hypothesis):
+        from ivg_kg.grounding.entailment import SYSTEM_PROMPT
+
+        return [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Document: {premise}\nClaim: {hypothesis}"},
+        ]
+
+    def test_batch_tokenization_has_no_doubled_bos(self):
+        """The batch re-tokenization must match the single path's leading ids."""
+        from transformers import AutoTokenizer
+
+        tok = AutoTokenizer.from_pretrained(
+            "bespokelabs/Bespoke-MiniCheck-7B", trust_remote_code=True
+        )
+        msgs = self._messages("A.", "B.")
+        single = tok.apply_chat_template(msgs, add_generation_prompt=True, return_tensors="pt")
+        single_ids = (single.input_ids if hasattr(single, "input_ids") else single)[0].tolist()
+        rendered = tok.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False)
+        batch_ids = tok(rendered, return_tensors="pt", add_special_tokens=False)["input_ids"][
+            0
+        ].tolist()
+        assert single_ids[:5] == batch_ids[:5], (
+            f"batch tokenization diverges from single (doubled BOS?): "
+            f"single={single_ids[:5]} batch={batch_ids[:5]}"
+        )
+        # And the bug form (default add_special_tokens=True) WOULD double the BOS:
+        doubled = tok(rendered, return_tensors="pt")["input_ids"][0].tolist()
+        assert doubled[:2] == [tok.bos_token_id, tok.bos_token_id], (
+            "expected the default re-tokenize to double the BOS (guards the fix's necessity)"
+        )
+
+    def test_entails_batch_deterministic_and_value_sensitive(self):
+        """Fresh gate, batch path FIRST (no cache priming): deterministic + value-sensitive."""
+        from ivg_kg.grounding.entailment import MiniCheckEntailmentGate
+
+        prem = "Tennessee Williams wrote The Glass Menagerie."
+        pairs = [
+            (prem, "The Glass Menagerie was written by Tennessee Williams."),
+            (prem, "The Glass Menagerie was written by Harold Pinter."),
+        ]
+        gate = MiniCheckEntailmentGate()
+        r1 = gate.entails_batch(pairs)
+        gate._cache.clear()
+        r2 = gate.entails_batch(pairs)
+        assert r1 == r2, f"batched forward must be deterministic: {r1} != {r2}"
+        assert r1[0] > 0.5 > r1[1], f"batch must stay value-sensitive: {r1}"

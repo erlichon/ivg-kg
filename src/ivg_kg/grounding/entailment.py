@@ -624,15 +624,25 @@ class MiniCheckEntailmentGate(BaseEntailmentGate):
                 chunk_prompts = uncached_prompts[chunk_start : chunk_start + MINICHECK_BATCH_SIZE]
                 chunk_indices = uncached_indices[chunk_start : chunk_start + MINICHECK_BATCH_SIZE]
 
-                # Tokenize the whole chunk with padding.
+                # Tokenize the whole chunk with padding. add_special_tokens=False
+                # because apply_chat_template already rendered the BOS (<s>) into
+                # the prompt string; the default (True) would prepend a SECOND BOS
+                # (TemplateProcessing), diverging from the single-pair _score path
+                # (apply_chat_template(tokenize=True) tokenizes with
+                # add_special_tokens=False) and corrupting batched scores.
                 encoded = self._tokenizer(
                     chunk_prompts,
                     padding=True,
                     return_tensors="pt",
+                    add_special_tokens=False,
                 )
                 input_ids = encoded["input_ids"].to(self._device)
                 attention_mask = encoded["attention_mask"].to(self._device)
-
+                # NB: do NOT pass explicit position_ids. The InternLM2 model derives
+                # correct positions from attention_mask under left-padding internally;
+                # an explicit cumsum-based position_ids was measured to make scores
+                # WORSE (an unpadded row that matched the single-pair _score exactly
+                # diverged once overridden). The left-pad attention_mask is sufficient.
                 with torch.no_grad():
                     outputs = self._model(
                         input_ids=input_ids,
