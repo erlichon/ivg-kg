@@ -15,13 +15,33 @@ source a reported number.
     ollama serve &               # start the local server
     ollama pull qwen2.5          # Qwen2.5-7B-Instruct (~4.7 GB)
 
-### 2. Install grounding extras (torch + transformers for MiniCheck-7B)
+### 2. Install grounding extras (torch + transformers + einops for MiniCheck-7B)
 
     uv sync --extra grounding
 
-MiniCheck-7B (bespokelabs/Bespoke-MiniCheck-7B, ~15 GB) downloads automatically
-on the first verifier call in Step 1 below.
-Requires Apple-Silicon (MPS), ~48 GB RAM.
+MiniCheck-7B (bespokelabs/Bespoke-MiniCheck-7B, ~15 GB, InternLM2 causal LM,
+loaded with trust_remote_code) downloads automatically on the first verifier
+call in Step 0/1 below. Requires Apple-Silicon (MPS), ~48 GB RAM (loaded bf16).
+
+### 3. Authenticate to Hugging Face (REQUIRED for the ~15 GB download)
+
+Unauthenticated downloads are throttled and STALL partway through the 4 shards.
+Set a token so the weights download reliably:
+
+    export HF_TOKEN=hf_...        # or: uv run hf auth login
+
+---
+
+## Step 0 -- Validate the verifier is value-sensitive (pre-flight)
+
+Before the full sweep, confirm the real MiniCheck-7B gate scores a true claim
+HIGH and a wrong-value claim LOW (this also triggers the one-time weight
+download). This is the falsifiable check that the verifier works on YOUR machine:
+
+    IVG_KG_RUN_MINICHECK=1 uv run pytest tests/test_minicheck_scoring.py -k integration -q
+
+Expect the 3 integration tests to PASS (true entailment > 0.5, wrong value < 0.5).
+If they fail or error on load, stop and report back before running the sweep.
 
 ---
 
@@ -103,6 +123,10 @@ This path is also exercised by the test suite:
     ollama serve &
     ollama pull qwen2.5
     uv sync --extra grounding
+    export HF_TOKEN=hf_...        # required so the 15 GB MiniCheck-7B download does not stall
+
+    # Step 0: validate the verifier (downloads weights, checks value-sensitivity)
+    IVG_KG_RUN_MINICHECK=1 uv run pytest tests/test_minicheck_scoring.py -k integration -q
 
     # Step 1: calibrate
     uv run python scripts/emit_calibration_report.py --gate minicheck
